@@ -1,3 +1,4 @@
+wheel
 matplotlib
 numpy
 pandas
@@ -6,4 +7,5 @@ jupyterlab
 pyreadstat
 statsmodels
 sklearn
-
+stata_setup
+stata_kernel
