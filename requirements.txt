@@ -9,3 +9,5 @@ statsmodels
 sklearn
 stata_setup
 stata_kernel
+lxml
+dbf
