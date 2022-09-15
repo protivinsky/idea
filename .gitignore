@@ -3,4 +3,6 @@ output
 temp
 rlib
 .ipynb_checkpoints
+.vscode
+wvenv
 

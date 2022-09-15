@@ -11,3 +11,6 @@ stata_setup
 stata_kernel
 lxml
 dbf
+yattag
+pyarrow
+python-docx
