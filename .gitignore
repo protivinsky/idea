@@ -5,4 +5,5 @@ rlib
 .ipynb_checkpoints
 .vscode
 wvenv
+wenv
 **/__pycache__

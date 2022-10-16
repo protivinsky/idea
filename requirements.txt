@@ -14,3 +14,4 @@ dbf
 yattag
 pyarrow
 python-docx
+openpyxl

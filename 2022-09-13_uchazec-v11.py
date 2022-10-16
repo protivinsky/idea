@@ -31,6 +31,8 @@ import pyreadstat
 import pandas as pd
 import numpy as np
 import re
+from io import StringIO
+from urllib.request import urlopen
 from statsmodels.stats.weightstats import DescrStatsW
 from sklearn.linear_model import LinearRegression
 import statsmodels.api as sm
@@ -140,7 +142,18 @@ def loader(year=21):
     }
     
     for c, url in registers.items():
-        rg = pd.read_xml(url, encoding='cp1250', xpath='./veta')
+        if c == 'vypr':
+            url_old = 'http://stistko.uiv.cz/katalog/ciselnik11x.asp?idc=MCPR&ciselnik=V%FDsledek+p%F8ij%EDmac%EDho+%F8%EDzen%ED&aap=on&poznamka='
+            html = urlopen(url_old).read()
+            cleanr = re.compile('<.*?>')
+            lines = [l.strip() for l in re.sub(cleanr, '', html.decode('windows-1250')).split('\r\n') if l.count(';') > 4]
+            text_data = StringIO('\n'.join(lines))
+            rg = pd.read_csv(text_data, sep=';', index_col=False)
+            rg.columns = [c.upper() for c in rg.columns]
+            rg = rg.groupby('KOD').last().reset_index()
+        else:
+            rg = pd.read_xml(url, encoding='cp1250', xpath='./veta')
+        
         rg['IDX'] = rg.index
         df = pd.merge(df.rename(columns={c: 'KOD'}), rg[['KOD', 'IDX']].rename(columns={'IDX': c}), 
                       how='left').drop(columns=['KOD'])        

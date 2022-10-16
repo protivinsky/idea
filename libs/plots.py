@@ -46,9 +46,10 @@ class Chart:
 
         doc, tag, text = Doc().tagtext()
 
-        doc.asis('<!DOCTYPE html>')
-        with tag('html'):
+        doc.asis('<!doctype html>')
+        with tag('html', lang='cs'):
             with tag('head'):
+                doc.stag('meta', charset='utf-8')
                 with tag('title'):
                     text(self.title or 'Chart')
             with tag('body'):
@@ -85,9 +86,10 @@ class Text:
 
         doc, tag, text = Doc().tagtext()
 
-        doc.asis('<!DOCTYPE html>')
-        with tag('html'):
+        doc.asis('<!doctype html>')
+        with tag('html', lang='cs'):
             with tag('head'):
+                doc.stag('meta', charset='utf-8')
                 with tag('title'):
                     text(self.title or 'Text')
             with tag('body'):
@@ -129,9 +131,10 @@ class Selector:
 
         doc, tag, text, line = Doc().ttl()
 
-        doc.asis('<!DOCTYPE html>')
-        with tag('html'):
+        doc.asis('<!doctype html>')
+        with tag('html', lang='cs'):
             with tag('head'):
+                doc.stag('meta', charset='utf-8')
                 with tag('title'):
                     text(self.title or 'Selector')
                 with tag('script'):

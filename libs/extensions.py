@@ -10,11 +10,15 @@ import docx
 os.environ['TEMP'] = 'D:/temp'
 tempfile.tempdir = 'D:/temp'
 
-def pd_dataframe_show(self, num_rows=1_000, format='csv', **kwargs):
+def pd_dataframe_show(self, title=None, num_rows=1_000, format='parquet', **kwargs):
     stamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     path = tempfile.gettempdir() + '/dataframes'
+    if title is None:
+        title = stamp
+    else:
+        path = os.path.join(path, stamp)
     os.makedirs(path, exist_ok=True)
-    path = '{}/{}.{}'.format(path, stamp, format)
+    path = '{}/{}.{}'.format(path, title, format)
     getattr(self.iloc[:num_rows], 'to_{}'.format(format))(path, **kwargs)
     os.startfile(path)
 

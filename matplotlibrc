@@ -9,6 +9,7 @@ figure.subplot.left : 0.1
 figure.subplot.bottom : 0.1
 figure.subplot.right : 0.96
 figure.subplot.top : 0.96
+figure.max_open_warning : 200
 
 # text
 font.size : 8
