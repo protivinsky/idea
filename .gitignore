@@ -7,3 +7,9 @@ rlib
 wvenv
 wenv
 **/__pycache__
+.idea
+
+# custom docx that should not be in the repo
+IDEA_SABLONA.docx
+template.docx
+empty.docx

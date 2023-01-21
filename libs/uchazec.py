@@ -28,6 +28,7 @@ variable_labels = {
     'vs_nazev': 'Název vysoké školy',
     'odhl': 'Odkud se uchazeč hlásí',
     'ss_izo': 'Identifikátor střední školy',
+    'ss_red_izo': 'Rezortní identifikátor střední školy',
     # 'ss': 'Střední škola',
     'ss_nuts': 'NUTS region střední školy',
     'ss_kraj': 'Kraj střední školy',
@@ -244,10 +245,10 @@ def loader(year=21):
     ss = ss.sort_values('year', ascending=False).drop_duplicates('IZO').sort_index()
     ss['OBOR'] = ss['OBOR'].str.strip()
 
-    sss = ss[['IZO', 'VUSC']].drop_duplicates().reset_index(drop=True)       
+    sss = ss[['IZO', 'VUSC', 'RED_IZO']].drop_duplicates().reset_index(drop=True)       
     # SS is complicated -> too lengthy for stata value labels...
     # df['ss'] = df['ss_izo']
-    df = pd.merge(df, sss[['IZO', 'VUSC']].rename(columns={'IZO': 'ss_izo', 'VUSC': 'ss_nuts'}), how='left')
+    df = pd.merge(df, sss[['IZO', 'RED_IZO', 'VUSC']].rename(columns={'IZO': 'ss_izo', 'RED_IZO': 'ss_red_izo', 'VUSC': 'ss_nuts'}), how='left')
     # df['ss_nuts'] = df['ss_izo']
     # value_labels['ss'] = sss[['IZO', 'ZAR_PLN']].set_index('IZO')['ZAR_PLN'].to_dict()
     # value_labels['ss_nuts'] = sss[['IZO', 'VUSC']].set_index('IZO')['VUSC'].to_dict()
@@ -411,6 +412,7 @@ def fix_duplicates(fr):
         droppers = {
             'gender': [drop_duplicates, drop_nan],
             'rmat': [drop_duplicates, drop_nan],
+            'ss_red_izo': [drop_duplicates, drop_nan],
             'ss_kraj': [drop_duplicates, drop_nan],
             'ss_typ': [drop_duplicates, drop_nan, drop_jine, drop_neni_ss, drop_gym],
             'ss_gym_delka': [drop_duplicates, drop_nan, drop_0, drop_6, drop_8],
@@ -438,7 +440,7 @@ def get_per_app(df, ped_col='pedf'):
     df['zaps_zapsal'] = df['zaps'] == 'Uchazeč se zapsal'
     df['zaps_nezapsal'] = df['zaps'] == 'Uchazeč se nezapsal'
 
-    other_keys = ['gender', 'rmat', 'ss_kraj', 'ss_typ', 'ss_gym_delka', 'ss_typ_g']
+    other_keys = ['gender', 'rmat', 'ss_red_izo', 'ss_kraj', 'ss_typ', 'ss_gym_delka', 'ss_typ_g']
 
     # replacing the naive approach by something more sophisticated
     # df_ids = df.groupby('id')[other_keys].first().reset_index()

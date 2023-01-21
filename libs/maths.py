@@ -14,7 +14,7 @@ def nanaverage(x, weights=None):
             res = np.nanmean(x, axis=0)
             return pd.Series(res, x.columns) if isinstance(x, pd.DataFrame) else res
     else:
-        w = x[weights]
+        w = x[weights].fillna(0)
         x = x.drop(columns=[weights])
         mask = np.isnan(x)
         xm = np.ma.masked_array(x, mask=mask)

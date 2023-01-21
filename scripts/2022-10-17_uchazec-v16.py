@@ -45,6 +45,9 @@ st = stata.run
 # locale.setlocale(locale.LC_ALL, 'cs_CS')
 #endregion
 
+# import warnings
+# warnings.simplefilter(action='ignore', category=FutureWarning)
+
 ###  SETUP THE ENVIRONMENT  ###
 #region
 # font sizes for importing to word
@@ -74,24 +77,29 @@ CHART_WIDTH = Mm(158)
 ###  LOAD AND PREPARE DATA  ###
 #region
 
-# for year in [17, 21]:
-#     print(f'loading 20{year}')
+generate_data = False
+postprocess_data = False
 
-#     # load and process data
-#     df, variable_labels, value_labels = uchazec.loader(year=year)
+if generate_data:
 
-#     # save data for stata -- this is apparently broken in windows - crashes on value labels...
-#     # df.to_stata(f'{uchazec.data_root}/uchazec/uch{year}.dta', write_index=False, version=118, variable_labels=variable_labels, value_labels=value_labels)
-    
-#     # apply value labels and save for python
-#     for c in df.columns:
-#         if c in value_labels.keys():
-#             df[c] = df[c].map(value_labels[c]).astype('category')
-#     df.to_parquet(f'temp/uchazec/uch{year}.parquet')
+    for year in [17, 21]:
+        print(f'loading 20{year}')
 
-regenerate_data = False
+        # load and process data
+        df, variable_labels, value_labels = uchazec.loader(year=year)
 
-if regenerate_data:
+        # save data for stata -- this is apparently broken in windows - crashes on value labels...
+        #   - and now it works fine?
+        df.to_stata(f'{uchazec.data_root}/uchazec/uch{year}.dta', write_index=False, version=118, variable_labels=variable_labels, value_labels=value_labels)
+        
+        # apply value labels and save for python
+        for c in df.columns:
+            if c in value_labels.keys():
+                df[c] = df[c].map(value_labels[c]).astype('category')
+        df.to_parquet(f'temp/uchazec/uch{year}.parquet')
+
+
+if postprocess_data:
 
     print('Regenerating from cache.')
     df17 = pd.read_parquet('temp/uchazec/uch17.parquet')
@@ -315,8 +323,6 @@ p.add_run('. Informace o oborech lze tedy také použít jako určité proxy pro
 #region
 doc.add_heading(f'{h.h1} Přihlášky na vysoké školy', 1)
 
-
-
 for y in [17, 21]:
     ff = eval(f'pf{y}')
     tot_prihlasek = eval(f'df{y}').shape[0]
@@ -371,6 +377,37 @@ for y in [17, 21]:
     doc.add_paragraph('')
 
 doc.add_paragraph('Dívky si podávají více přihlášek oproti chlapcům. Další analýza také ukáže, že dívky si zpravidla vybírají vysoké školy s vyššími nároky u přijímacích zkoušek (tedy školy, kam se v průměru dostane menší počet uchazečů).')
+
+doc.add_heading(f'{h.h2} Rozdíly mezi chlapci a dívkami', 2)
+
+pr17 = df17.groupby('gender')[['prijat', 'w']].apply(nanaverage, weights='w')['prijat']
+pr21 = df21.groupby('gender')[['prijat', 'w']].apply(nanaverage, weights='w')['prijat']
+
+tot17 = po17['gender'].value_counts()
+zps17 = po17[po17['zapis_bool']]['gender'].value_counts()
+
+tot21 = po21['gender'].value_counts()
+zps21 = po21[po21['zapis_bool']]['gender'].value_counts()
+
+doc.add_paragraph(f'V roce 2017 dívky uspěly průměrně v {pr17["Dívka"]:.1%} přijímacích řízení, zatímco chlapci v {pr17["Chlapec"]:.1%} případů. Data pro rok 2021 jsou obdobná, dívky uspěly v {pr21["Dívka"]:.1%}, zatímco chlapci v {pr21["Chlapec"]:.1%} přijímacích řízení. Na vysoké školy se následně zapsalo {zps17["Dívka"]:,} dívek ({zps17["Dívka"] / tot17["Dívka"]:.1%} uchazeček) a {zps17["Chlapec"]:,} chlapců ({zps17["Chlapec"] / tot17["Chlapec"]:.1%} uchazečů) v roce 2017, {zps21["Dívka"]:,} dívek ({zps21["Dívka"] / tot21["Dívka"]:.1%} uchazeček) a {zps21["Chlapec"]:,} chlapců ({zps21["Chlapec"] / tot21["Chlapec"]:.1%} uchazečů) v roce 2021.')
+doc.add_paragraph('')
+doc.add_paragraph('Ačkoli se chlapci a dívky výrazně liší v úspěšnosti u přijímacích řízení, většina tohoto rozdílu je způsobena odlišnými obory, na které se hlásí. Pokud při odhadu pravděpodobnosti přijetí zohledníme konkrétní obory (jde tedy o logistickou regresi s úspěšností jako závislou proměnnou a pohlavím a indikátory pro obory jako nezávislými proměnnými), pak jsou rozdíly v pravděpodobnosti přijetí mnohem menší: chlapci jsou přijati o 2.6 procentního bodu častěji oproti dívkám v roce 2017, o 1.5 procentního bodu častěji v roce 2021. Tento malý rozdíl může být způsobený tím, že dívek se o VŠ uchází výrazně více, jedná se tedy o širší skupinu v rámci celého dovednostního spektra.')
+
+# # porovnání oborů logistickou regresí:
+# stata.pdataframe_to_data(df17, force=True)
+# # stata.pdataframe_to_data(df21, force=True)
+#
+# %%stata
+# encode aki4, gen(aki4c)
+# encode gender, gen(genderc)
+# logit prijat genderc i.aki4c [pw=w]
+#
+# %stata logit prijat genderc [pw=w]
+#
+# logistic(-0.0580242)
+# logistic(-0.102552)
+
+
 #endregion
 
 # 3. PROFIL UCHAZEČŮ O PEDAGOGICKÉ OBORY
@@ -831,83 +868,6 @@ for y in [17, 21]:
         doc.add_paragraph('')
         doc.add_paragraph('Data naznačují, že přijímací řízení na pedagogických oborech bylo v roce 2021 srovnatelně náročné jako v roce 2017. Také uchazeči, kteří byli zároveň přijatí na pedagogický a nepedagogický obor, si v obou letech vybírali pro zápis mírně častěji nepedagogický obor oproti pedagogickému.')
 
-    doc.add_heading('Revealed Preferences', 3)
-    doc.add_paragraph('Pokud byl uchazeč přijatý na dva různé obory, lze sledovat, kam se nakonec skutečně zapsal. Porovnáním jednotlivých dvojic oborů tak můžeme usuzovat na skutečné preference uchazečů ohledně studijních oborů.')
-    doc.add_paragraph('')
-    doc.add_paragraph('Následující graf uvažuje všechny uchazeče, kteří byli přijati na dva různé obory X a Y a následně se do jednoho z těchto oborů zapsali a do druhého nikoli. Hodnota v řádku X a sloupci Y udává podíl uchazečů (v procentech), kteří si vybrali pro zápis obor X; obdobně hodnota v řádku Y a sloupci X udává podíl uchazečů, kteří se zapsali na obor Y (tato preference mezi obory je kódována i barvou, kde modrá značí preferenci pro daný řádek, oproti tomu červená barva značí preferenci jiných oborů). Velikost bublin znázorňuje celkové množství uchazečů, kteří byli na danou kombinaci oborů přijati (velké bubliny jsou významnější, malé příliš ne).')
-
-    if y == 17:
-        doc.add_paragraph('')
-        doc.add_paragraph('Z grafu je tak například patrné, že uchazeči často upřednostňují oborovou skupinu "Obchod, administrativa a právo" (pravděpodobně kvůli právu), mnoho z nich dává přednost také zdravotním oborům před přírodovědnými nebo technickými. Uchazeči pedagogických oborů také dávají přednost skupině "Obchod, administrativa a právo", naopak před přírodními vědami volí spíše pedagogické obory.')
-        doc.add_paragraph('')
-    else:
-        doc.add_paragraph('')
-        doc.add_paragraph('Uchazeči v roce 2021 preferují zdravotnictví před jinými obory (vyšší preference oproti roku 2017 může být důsledkem epidemie COVID-19), naopak mají výrazně nižší zájem o služby. Uchazeči pedagogických oborů preferují zdravotní obory, pokud se na ně také dostanou, naopak dávají přednost pedagogickým oborům před službami nebo technickými obory. V některých ohledech se revealed preferences v roce 2021 liší od revealed preferences v roce 2017, příčinou rozdílů může být jak epidemie COVID-19, tak mírně odlišné kódování oborů v těchto letech.')
-        doc.add_paragraph('')
-
-    df = eval(f'df{y}')
-    isc = eval(f'isc{y}').copy()
-
-    foo = df[df['prijat']].copy()
-    akivar = 'aki2'
-    foo_id = foo[['id', akivar]].drop_duplicates()['id'].value_counts()
-    foo_id_mult = foo_id[foo_id > 1].index
-
-    foo = foo[foo['id'].isin(foo_id_mult)].copy()
-    bar = foo.groupby(['id', akivar])['zaps_zapsal'].sum().reset_index()
-    bar['pref'] = np.where(bar['zaps_zapsal'] > 0.5, 1, -1)
-
-    aki2s = isc['aki2'].drop_duplicates().dropna().sort_values().values
-    barpr = bar.pivot(index='id', columns=akivar, values='pref').fillna(0).astype(int)
-    barpr['min'] = barpr.min(axis=1)
-    barpr['max'] = barpr.max(axis=1)
-    barpr = barpr[(barpr['min'] == -1) & (barpr['max'] == 1)].drop(columns=['min', 'max'])
-
-    def comp_prefs(data, akis):
-        assert data.shape[1] == len(akis)
-        prefs = np.full([len(akis), len(akis)], 0)
-        tots = np.full([len(akis), len(akis)], 0)
-        def inner(x):
-            idx = np.outer(x > 0, x < 0)
-            prefs[idx] +=1
-            tots[idx] +=1
-            tots[idx.T] +=1
-        np.apply_along_axis(inner, 1, data.values)
-        return prefs, tots
-
-    prefs, tots = comp_prefs(barpr, aki2s)
-    prefs = pd.DataFrame(prefs, index=aki2s, columns=aki2s)
-    tots = pd.DataFrame(tots, index=aki2s, columns=aki2s)
-
-    aki2_dict = isc[['aki2', 'isced2']].drop_duplicates().set_index('aki2')['isced2'].to_dict()
-    aki2_dict_short = {k: v if len(v) < 20 else v[:18] + '...' for k, v in aki2_dict.items()}
-
-    mask = pd.DataFrame(np.eye(len(aki2s), dtype='bool'), columns=conf.columns, index=conf.index)
-
-    rp = pd.merge(tots.stack().rename('tot').reset_index(), prefs.stack().rename('pref').reset_index())
-    rp['ppct'] = 100 * rp['pref'] / rp['tot']
-    rp['x'] = rp['level_1'].map(aki2_dict_short)
-    rp['y'] = rp['level_0'].map(aki2_dict_short)
-    rp = rp.dropna(subset='ppct')
-    rp['sqrt_tot'] = np.sqrt(rp['tot'])
-
-    isced2s = [aki2_dict_short[x] for x in aki2s]
-    rp['x'] = pd.Categorical(rp['x'], categories=isced2s, ordered=True)
-    rp['y'] = pd.Categorical(rp['y'], categories=isced2s, ordered=True)
-
-    fig, ax = plt.subplots()
-    sns.scatterplot(data=rp, x='x', y='y', hue='ppct', palette='RdYlBu', size='sqrt_tot', sizes=(5, 3000))
-    for _, row in rp.iterrows():
-        color, alpha = ('black', 0.8) if 25 < row['ppct'] < 75 else ('white', 1)
-        ax.text(x=row['x'], y=row['y'], s=f'{row["ppct"]:.0f}', va='center', ha='center', alpha=alpha, color=color)
-    ax.set(xlabel=None, ylabel=None, title='Revealed Preferences při zápisu do oborů')
-    plt.xticks(rotation=30, ha='right')
-    plt.legend([],[], frameon=False)
-    fig.tight_layout()
-
-    figpath = savefig(fig, f'uchazeci_revealed_preferences_{y}')
-    doc.add_picture(figpath, width=CHART_WIDTH)
-    
 
 doc.add_heading(f'{h.h2} Úspěšnost podle krajů', 2)
 ped_col = 'ped_obor'
@@ -1153,7 +1113,379 @@ p.add_run(' je mírně obtížnější se dostat ve srovnání s ostatními peda
 
 #endregion
 
-# 6. PROFIL UCHAZEČŮ O PEDAGOGICKÉ FAKULTY
+# 6. REVEALED PREFERENCES
+#region
+doc.add_heading(f'{h.h1} Revealed Preferences', 1)
+
+for y in [17, 21]:
+    ff = eval(f'po{y}')
+    ped_col = 'ped_obor'
+
+    doc.add_heading(f'{h.h2} Projevené preference uchazečů v roce 20{y}', 2)
+    
+    doc.add_paragraph('Pokud byl uchazeč přijatý na dva různé obory, lze sledovat, kam se nakonec skutečně zapsal. Porovnáním jednotlivých dvojic oborů tak můžeme usuzovat na skutečné preference uchazečů ohledně studijních oborů.')
+    doc.add_paragraph('')
+
+    if y == 17:
+        doc.add_paragraph('Následující graf uvažuje všechny uchazeče, kteří byli přijati na dva různé obory X a Y a následně se do jednoho z těchto oborů zapsali a do druhého nikoli. Hodnota v řádku X a sloupci Y udává podíl uchazečů (v procentech), kteří si vybrali pro zápis obor X; obdobně hodnota v řádku Y a sloupci X udává podíl uchazečů, kteří se zapsali na obor Y (tato preference mezi obory je kódována i barvou, kde modrá značí preferenci pro daný řádek, oproti tomu červená barva značí preferenci jiných oborů). Velikost bublin znázorňuje celkové množství uchazečů, kteří byli na danou kombinaci oborů přijati (velké bubliny jsou významnější, malé příliš ne).')
+        doc.add_paragraph('')
+        doc.add_paragraph('Z grafu je tak například patrné, že uchazeči často upřednostňují oborovou skupinu "Obchod, administrativa a právo" (pravděpodobně kvůli právu), mnoho z nich dává přednost také zdravotním oborům před přírodovědnými nebo technickými. Uchazeči pedagogických oborů také dávají přednost skupině "Obchod, administrativa a právo", naopak před přírodními vědami volí spíše pedagogické obory.')
+        doc.add_paragraph('')
+    else:
+        doc.add_paragraph('Uchazeči v roce 2021 preferují zdravotnictví před jinými obory (vyšší preference oproti roku 2017 může být důsledkem epidemie COVID-19), naopak mají výrazně nižší zájem o služby. Uchazeči pedagogických oborů preferují zdravotní obory, pokud se na ně také dostanou, naopak dávají přednost pedagogickým oborům před službami nebo technickými obory. V některých ohledech se revealed preferences v roce 2021 liší od revealed preferences v roce 2017, příčinou rozdílů může být jak epidemie COVID-19, tak mírně odlišné kódování oborů v těchto letech.')
+        doc.add_paragraph('')
+
+    df = eval(f'df{y}')
+    isc = eval(f'isc{y}').copy()
+
+    foo = df[df['prijat']].copy()
+    akivar = 'aki2'
+    foo_id = foo[['id', akivar]].drop_duplicates()['id'].value_counts()
+    foo_id_mult = foo_id[foo_id > 1].index
+
+    foo = foo[foo['id'].isin(foo_id_mult)].copy()
+    bar = foo.groupby(['id', akivar])['zaps_zapsal'].sum().reset_index()
+    bar['pref'] = np.where(bar['zaps_zapsal'] > 0.5, 1, -1)
+
+    aki2s = isc['aki2'].drop_duplicates().dropna().sort_values().values
+    barpr = bar.pivot(index='id', columns=akivar, values='pref').fillna(0).astype(int)
+    barpr['min'] = barpr.min(axis=1)
+    barpr['max'] = barpr.max(axis=1)
+    barpr = barpr[(barpr['min'] == -1) & (barpr['max'] == 1)].drop(columns=['min', 'max'])
+
+    def comp_prefs(data, akis):
+        assert data.shape[1] == len(akis)
+        prefs = np.full([len(akis), len(akis)], 0)
+        tots = np.full([len(akis), len(akis)], 0)
+        def inner(x):
+            idx = np.outer(x > 0, x < 0)
+            prefs[idx] +=1
+            tots[idx] +=1
+            tots[idx.T] +=1
+        np.apply_along_axis(inner, 1, data.values)
+        return prefs, tots
+
+    prefs, tots = comp_prefs(barpr, aki2s)
+    prefs = pd.DataFrame(prefs, index=aki2s, columns=aki2s)
+    tots = pd.DataFrame(tots, index=aki2s, columns=aki2s)
+
+    aki2_dict = isc[['aki2', 'isced2']].drop_duplicates().set_index('aki2')['isced2'].to_dict()
+    aki2_dict_short = {k: v if len(v) < 20 else v[:18] + '...' for k, v in aki2_dict.items()}
+
+    mask = pd.DataFrame(np.eye(len(aki2s), dtype='bool'), columns=conf.columns, index=conf.index)
+
+    rp = pd.merge(tots.stack().rename('tot').reset_index(), prefs.stack().rename('pref').reset_index())
+    rp['ppct'] = 100 * rp['pref'] / rp['tot']
+    rp['x'] = rp['level_1'].map(aki2_dict_short)
+    rp['y'] = rp['level_0'].map(aki2_dict_short)
+    rp = rp.dropna(subset='ppct')
+    rp['sqrt_tot'] = np.sqrt(rp['tot'])
+
+    isced2s = [aki2_dict_short[x] for x in aki2s]
+    rp['x'] = pd.Categorical(rp['x'], categories=isced2s, ordered=True)
+    rp['y'] = pd.Categorical(rp['y'], categories=isced2s, ordered=True)
+
+    fig, ax = plt.subplots()
+    sns.scatterplot(data=rp, x='x', y='y', hue='ppct', palette='RdYlBu', size='sqrt_tot', sizes=(5, 3000))
+    for _, row in rp.iterrows():
+        color, alpha = ('black', 0.8) if 25 < row['ppct'] < 75 else ('white', 1)
+        ax.text(x=row['x'], y=row['y'], s=f'{row["ppct"]:.0f}', va='center', ha='center', alpha=alpha, color=color)
+    ax.set(xlabel=None, ylabel=None, title='Preference při zápisu do širších oborových skupin')
+    plt.xticks(rotation=30, ha='right')
+    plt.legend([],[], frameon=False)
+    fig.tight_layout()
+
+    figpath = savefig(fig, f'uchazeci_revealed_preferences_{y}')
+    doc.add_picture(figpath, width=CHART_WIDTH)
+
+    if y == 17:
+        doc.add_paragraph('')
+        doc.add_paragraph(f'Širší oborové skupiny podle ISCED-F vymezují deset kategorií. Analogicky lze napočítat revealed preferences i na užších oborových skupinách (36 kategorií) nebo na oborech (83 kategorií), avšak graf se potom stává velice nepřehledným. Oba grafy zde také přikládám, znázorněny jsou pouze kombinace oborů, do kterých bylo přijato alespoň deset studentů (a grafy jsou čitelné jen při výrazném zvětšení dokumentu).')
+        doc.add_paragraph('')
+        doc.add_paragraph(f'Výsledky pro užší oborové skupiny potvrzují, že nejvíce studenti preferují právo a zdravotní obory{"" if y == 17 else ", případně také umělecké obory v roce 2021 (které však přijímají jen malé množství studentů)"}. Výsledky pro jednotlivé obory nabízí detailnější vhled do rozhodování studentů mezi blízkými obory. Výsledky poukazují:')
+        doc.add_paragraph('')
+        doc.add_paragraph('Konkurence mezi pedaogickými obory a ostatními obory se týká především uchazečů o obor "Příprava učitelů s předmětovou specializací", v menší míře také uchazečů o obor "Pedagogika".', style='Bullet List')
+        doc.add_paragraph('"Humánní medicína" je jeden z nejvíce preferovaných oborů, pokud se je však zároveň student přijatý i na obor "Stomatologie", vybírá si zpravidla stomatologii.', style='Bullet List')
+        doc.add_paragraph('Pokud je student přijatý na architekturu i na stavebnictví, vybírá si téměř vždy architekturu pro zápis.', style='Bullet List')
+        doc.add_paragraph('Ze společenských věd jsou nejvíce preferované psychologie a žurnalistika; pokud se však student dostane na oba tyto obory, volí téměř vždy psychologii.', style='Bullet List')
+        doc.add_paragraph('V roce 2017 si studenti přijatí na právo i na medicínu vybírali častěji právo, v roce 2021 si častěji volili medicínu pro zápis.', style='Bullet List')
+        doc.add_paragraph('')
+
+    foo = df[df['prijat']].copy()
+    akivar = 'aki3'
+    foo_id = foo[['id', akivar]].drop_duplicates()['id'].value_counts()
+    foo_id_mult = foo_id[foo_id > 1].index
+
+    foo = foo[foo['id'].isin(foo_id_mult)].copy()
+    bar = foo.groupby(['id', akivar])['zaps_zapsal'].sum().reset_index()
+    bar['pref'] = np.where(bar['zaps_zapsal'] > 0.5, 1, -1)
+
+    akis = isc[akivar].drop_duplicates().dropna().sort_values().values
+    barpr = bar.pivot(index='id', columns=akivar, values='pref').fillna(0).astype(int)
+    barpr['min'] = barpr.min(axis=1)
+    barpr['max'] = barpr.max(axis=1)
+    barpr = barpr[(barpr['min'] == -1) & (barpr['max'] == 1)].drop(columns=['min', 'max'])
+
+    prefs, tots = comp_prefs(barpr, akis)
+
+    prefs = pd.DataFrame(prefs, index=akis, columns=akis)
+    tots = pd.DataFrame(tots, index=akis, columns=akis)
+
+    aki_dict = isc[[akivar, 'isced' + akivar[-1]]].drop_duplicates().set_index(akivar)['isced' + akivar[-1]].to_dict()
+    aki_dict_short = {k: v + ' [' + k + ']' if len(v) < 20 else v[:18] + '... [' + k + ']' for k, v in aki_dict.items()}
+
+    rp = pd.merge(tots.stack().rename('tot').reset_index(), prefs.stack().rename('pref').reset_index())
+    rp['ppct'] = 100 * rp['pref'] / rp['tot']
+    rp['ppct_fltr'] = np.where(rp['tot'] < 10, np.nan, rp['ppct'])
+    rp['x'] = rp['level_1'].map(aki_dict_short)
+    rp['y'] = rp['level_0'].map(aki_dict_short)
+    rp = rp.dropna(subset='ppct')
+    rp['sqrt_tot'] = np.sqrt(rp['tot'])
+
+    isceds = [aki_dict_short[x] for x in akis]
+    rp['x'] = pd.Categorical(rp['x'], categories=isceds, ordered=True)
+    rp['y'] = pd.Categorical(rp['y'], categories=isceds, ordered=True)
+
+    fig, ax = plt.subplots(figsize=(30, 18))
+    sns.scatterplot(data=rp, x='x', y='y', hue='ppct_fltr', palette='RdYlBu', size='sqrt_tot', sizes=(5, 3000))
+    for _, row in rp.iterrows():
+        if not pd.isna(row['ppct_fltr']):
+            color, alpha = ('black', 0.8) if 25 < row['ppct'] < 75 else ('white', 1)
+            ax.text(x=row['x'], y=row['y'], s=f'{row["ppct"]:.0f}', va='center', ha='center', alpha=alpha, color=color)
+    ax.set(xlabel=None, ylabel=None, title='Preference při zápisu do užších oborových skupin')
+    plt.xticks(rotation=30, ha='right')
+    plt.legend([],[], frameon=False)
+    fig.tight_layout()
+        
+    figpath = savefig(fig, f'uchazeci_revealed_preferences_isced3_{y}')
+    doc.add_picture(figpath, width=CHART_WIDTH)
+
+    foo = df[df['prijat']].copy()
+    akivar = 'aki4'
+    foo_id = foo[['id', akivar]].drop_duplicates()['id'].value_counts()
+    foo_id_mult = foo_id[foo_id > 1].index
+
+    foo = foo[foo['id'].isin(foo_id_mult)].copy()
+    bar = foo.groupby(['id', akivar])['zaps_zapsal'].sum().reset_index()
+    bar['pref'] = np.where(bar['zaps_zapsal'] > 0.5, 1, -1)
+
+    akis = isc[akivar].drop_duplicates().dropna().sort_values().values
+
+    barpr = bar.pivot(index='id', columns=akivar, values='pref').fillna(0).astype(int)
+    barpr['min'] = barpr.min(axis=1)
+    barpr['max'] = barpr.max(axis=1)
+    barpr = barpr[(barpr['min'] == -1) & (barpr['max'] == 1)].drop(columns=['min', 'max'])
+
+    akis = barpr.columns.values
+    prefs, tots = comp_prefs(barpr, akis)
+
+    prefs = pd.DataFrame(prefs, index=akis, columns=akis)
+    tots = pd.DataFrame(tots, index=akis, columns=akis)
+
+    valid = tots.index[tots.max() >= 10]
+    prefs = prefs[valid].loc[valid]
+    tots = tots[valid].loc[valid]
+    akis = tots.columns.values
+
+    aki_dict = isc[[akivar, 'isced' + akivar[-1]]].drop_duplicates().set_index(akivar)['isced' + akivar[-1]].to_dict()
+    aki_dict_short = {k: v + ' [' + k + ']' if len(v) < 20 else v[:18] + '... [' + k + ']' for k, v in aki_dict.items()}
+
+    rp = pd.merge(tots.stack().rename('tot').reset_index(), prefs.stack().rename('pref').reset_index())
+    rp['ppct'] = 100 * rp['pref'] / rp['tot']
+    rp['ppct_fltr'] = np.where(rp['tot'] < 10, np.nan, rp['ppct'])
+    rp['x'] = rp['level_1'].map(aki_dict_short)
+    rp['y'] = rp['level_0'].map(aki_dict_short)
+    rp = rp.dropna(subset='ppct')
+    rp['sqrt_tot'] = np.sqrt(rp['tot'])
+    isceds = [aki_dict_short[x] for x in akis]
+    rp['x'] = pd.Categorical(rp['x'], categories=isceds, ordered=True)
+    rp['y'] = pd.Categorical(rp['y'], categories=isceds, ordered=True)
+
+    fig, ax = plt.subplots(figsize=(30, 18))
+    sns.scatterplot(data=rp, x='x', y='y', hue='ppct_fltr', palette='RdYlBu', size='sqrt_tot', sizes=(5, 3000))
+    for _, row in rp.iterrows():
+        if not pd.isna(row['ppct_fltr']):
+            color, alpha = ('black', 0.8) if 25 < row['ppct'] < 75 else ('white', 1)
+            ax.text(x=row['x'], y=row['y'], s=f'{row["ppct"]:.0f}', va='center', ha='center', alpha=alpha, color=color)
+    ax.set(xlabel=None, ylabel=None, title='Preference při zápisu do jednotlivých oborů')
+    plt.xticks(rotation=30, ha='right')
+    plt.legend([],[], frameon=False)
+    fig.tight_layout()
+
+    figpath = savefig(fig, f'uchazeci_revealed_preferences_isced4_{y}')
+    doc.add_picture(figpath, width=CHART_WIDTH)
+
+
+
+#endregion
+
+# 7. ANALÝZA STŘEDNÍCH ŠKOL
+#region
+doc.add_heading(f'{h.h1} Analýza středních škol', 1)
+
+doc.add_paragraph('Uchazeče o vysoké školy je možné analyzovat také optikou středních škol, ze kterých se hlásí. Data z databáze uchazeč za rok 2021 jsou napojena na údaje o počtu absolventů jednotlivých škol. Přibližně u sta škol je v databázi Uchazeč více žáků maturujících v daném roce než kolik bylo absolventů: malé rozdíly jsou pravděpodobně způsobené žáky, kteří se sice hlásili na vysoké školy, avšak nepovedlo se jim dokončit studium střední školy v daném roce. U malého množství škol jsou však diskrepance větší, mohou být způsobeny nespolehlivými údaji o absolventech některých škol (příkladem jsou školy s RED IZO 600007472, 600005666, 600005836).')
+doc.add_paragraph('')
+
+# zaci = pd.read_excel("../data/uchazec/absolventi_ss.xlsx")
+ab_raw = pd.read_excel("../data/uchazec/absolventi_ss.xlsx", sheet_name="List3")
+ab = ab_raw.groupby('red_izo')[['absolventi_celkem', 'absolventi_divky']].sum().reset_index().rename(columns={"red_izo": "ss_red_izo"})
+
+ped_col = 'ped_obor'
+vars_to_sum = ['prihl_bool', 'prijat_bool', 'zapis_bool', f'prihl_{ped_col}_bool', f'prijat_{ped_col}_bool', f'zapis_{ped_col}_bool']
+foo = po21.groupby(['gender', 'ss_red_izo'])[vars_to_sum].sum()
+
+foo = foo.unstack(level=0).fillna(0).reset_index()
+sfx = {'': '', 'Chlapec': '_chlapec', 'Dívka': '_divka'}
+foo.columns = [x + sfx[y] for x, y in foo.columns]
+
+foo = pd.merge(foo, ab, how='left')
+foo = foo.rename(columns={'absolventi_divky': 'absolventi_divka'})
+foo['absolventi_chlapec'] = foo['absolventi_celkem'] - foo['absolventi_divka']
+
+for x in vars_to_sum:
+    foo[f'{x}_celkem'] = foo[f'{x}_divka'] + foo[f'{x}_chlapec']
+
+isc21['aki4_podil_prijat'] = isc21['prijat'] / isc21['total']
+aki4 = isc21[['aki4', 'aki4_podil_prijat']]
+df21_ = pd.merge(df21, aki4, how='left')
+
+ss_ambice = df21_.groupby('ss_red_izo')[['aki4_podil_prijat', 'w']].apply(nanaverage, weights='w').reset_index()
+ss_ambice2 = df21_[~df21_['ped_obor']].groupby('ss_red_izo')[['aki4_podil_prijat', 'w']].apply(nanaverage, weights='w').reset_index().rename(columns={'aki4_podil_prijat': 'aki4_podil_prijat_no_ped'})
+ss21 = pd.merge(foo, ss_ambice)
+ss21 = pd.merge(ss21, ss_ambice2, how='left')
+
+ss_kraj = df21[['ss_red_izo', 'ss_kraj']].drop_duplicates().dropna()
+ss21 = pd.merge(ss21, ss_kraj)
+
+foo = po21[['ss_red_izo', 'ss_typ']].drop_duplicates().dropna()
+foo = foo[~foo['ss_typ'].isin(['Není SŠ', 'Jiné'])]
+bar = foo['ss_red_izo'].value_counts()
+multiple = bar[bar > 1]
+foo = foo[~foo.ss_red_izo.isin(multiple.index)]
+
+ss21 = pd.merge(ss21, foo, how='left')
+ss21['ss_typ'] = ss21['ss_typ'].fillna('Jiné')
+
+# now I should be able to compute everything
+ss21['podil_uchazecu'] = ss21['prihl_bool_celkem'] / ss21['absolventi_celkem']
+ss21['podil_ped_uchazecu'] = ss21[f'prihl_{ped_col}_bool_celkem'] / ss21['absolventi_celkem']
+ss21['podil_ped_uchazecu_z_uchazecu'] = ss21[f'prihl_{ped_col}_bool_celkem'] / ss21['prihl_bool_celkem']
+ss21['podil_ped_uchazecu_z_uchazecu_disc'] = pd.cut(ss21['podil_ped_uchazecu_z_uchazecu'], bins=[-0.001, 0.25, 0.5, 1.001])
+ss21['podil_divek'] = ss21['absolventi_divka'] / ss21['absolventi_celkem']
+ss21['podil_divek_disc'] = pd.cut(ss21['podil_divek'], bins=[-0.001, 0.3, 0.7, 1.001])
+
+ss21['podil_uchazecu_pct'] = 100 * ss21['podil_uchazecu']
+ss21['podil_ped_uchazecu_pct'] = 100 * ss21['podil_ped_uchazecu']
+ss21['podil_ped_uchazecu_z_uchazecu_pct'] = 100 * ss21['podil_ped_uchazecu_z_uchazecu']
+ss21['aki4_podil_prijat_pct'] = 100 * ss21['aki4_podil_prijat']
+ss21['aki4_podil_prijat_no_ped_pct'] = 100 * ss21['aki4_podil_prijat_no_ped']
+
+# pokud bych to chtěl zobrazit pomoci .show
+to_drop = ['podil_ped_uchazecu_z_uchazecu_disc', 'podil_divek_disc']
+
+# weird = ss21[ss21['podil_uchazecu'] > 1]
+# weird.drop(columns=to_drop).show('weird')
+# import warnings
+# warnings.simplefilter(action='ignore', category=FutureWarning)
+
+# priklady problematickych RED IZO skol:
+# - 600007472: 1 absolvent, 0 zaku, ale v datech mame 16 uchazecu
+# - 600005666: 1 absolvent, 171 zaku (to je trochu podezrele), mame 15 uchazecu
+# - 600005836: 7 absolventu, 141 zaku, 43 uchazecu
+
+# toto jsou nejkriklavejsi pripady, celkem je temer sto skol, kde mame vyssi pocet uchazecu nez absolventu. ackoli u vetsiny z nich jsou ty rozdily male, o 1-2 zaky
+
+# zaci[zaci.red_izo == 600007472]
+# zaci[zaci.red_izo == 600005666]
+# ab_raw[ab_raw.red_izo == 600005666].T
+# df21[df21.ss_red_izo == 600005666].show()
+# ab_raw[ab_raw.p_izo == 10622110]
+# ab_raw[ab_raw.red_izo == 600005836]
+# zaci[zaci.red_izo == 600005836]
+
+doc.add_paragraph('Následující graf srovnává pro jednotlivé střední školy podíl absolventů, kteří se uchází o VŠ, a jejich aplikační ambice. Aplikační ambice jsou zde vyjádřené jako průměrná míra přijetí na oborech, kam se absolventi dané SŠ hlásí (nižší hodnota tedy znamená vyšší ambice absolventů). Velikost bublin odpovídá velikosti dané SŠ (resp. počtu absolventů v roce 2021), barva značí typ dané střední školy (kategorie "Jiné" zahrnuje jak školy, které nebyly zařazeny do kategorií SOŠ nebo Gymnázium, tak školy, které kombinují obě tyto kategorie dohromady). Z grafu je patrné, že na gymnáziích se o studium na VŠ uchází téměř všichni absolventi, oproti tomu zájem o studium na VŠ se mezi jednotlivými SOŠ velmi liší. Absolventi gymnázií jsou také ambicióznější v oborech, které si pro své studium vybírají. Na některých školách je počet uchazečů vyšší než počet absolventů: částečně toto lze vysvětlit tím, že některým uchazečům se nepodařilo dokončit střední školu, částečně to může být způsobeno i nepřesnými daty o absolventech. Střední školy, kde počet uchazečů převyšoval počet absolventů o více než o 20 %, jsou z grafu vynechány.')
+doc.add_paragraph('')
+
+fig, ax = plt.subplots()
+sns.scatterplot(data=ss21[ss21['podil_uchazecu'] <= 1.2], x='podil_uchazecu_pct', y='aki4_podil_prijat_pct', hue='ss_typ', size='absolventi_celkem', sizes=(5, 200), alpha=0.8, ec='black')
+handles, labels = ax.get_legend_handles_labels()
+ax.legend(handles[1:4], labels[1:4], title='Typ střední školy')
+ax.xaxis.set_major_formatter(mpl.ticker.PercentFormatter())
+ax.yaxis.set_major_formatter(mpl.ticker.PercentFormatter())
+ax.set(xlabel='Podíl absolventů ucházejících se o VŠ', ylabel='Aplikační ambice', title='Podíl uchazečů a jejich ambice podle typů škol')
+fig.tight_layout()
+
+figpath = savefig(fig, f'ss_podil_uchazecu_ambice')
+doc.add_picture(figpath, width=CHART_WIDTH)
+
+doc.add_paragraph('')
+doc.add_paragraph('Další graf ukazuje, že školy se v zájmu o studium na VŠ také zásadně liší podle převažujícího genderu mezi studenty. Zatímco na většině gymnázií a některých středních školách je zastoupení chlapců a dívek relativně vyrovnané, graf ukazuje, že u středních odborných škol panují velké rozdíly: střední školy s převahou chlapců vykazují výrazně nižší aplikační ambice svých uchazečů (technické obory nejsou příliš selektivní), zároveň je u nich častěji nižší celkový zájem o studium na VŠ. Oproti tomu žáci ze škol s výraznou převahou dívek se častěji hlásí na VŠ a jsou ambicióznější ve svých přihláškách (často se jedna o zdravotnické nebo pedagogické střední školy).')
+doc.add_paragraph('')
+
+fig, ax = plt.subplots()
+pal = ['royalblue', 'goldenrod', 'firebrick']
+sns.scatterplot(data=ss21[ss21['podil_uchazecu'] <= 1.2], x='podil_uchazecu_pct', y='aki4_podil_prijat_pct', hue='podil_divek_disc', size='absolventi_celkem', sizes=(5, 200), alpha=0.8, ec='black', palette=pal)
+handles, _ = ax.get_legend_handles_labels()
+ax.legend(handles[1:4], [r'<30 %', r'30 % – 70 %', r'>70 %'], title='Podíl dívek')
+ax.xaxis.set_major_formatter(mpl.ticker.PercentFormatter())
+ax.yaxis.set_major_formatter(mpl.ticker.PercentFormatter())
+ax.set(xlabel='Podíl absolventů ucházejících se o VŠ', ylabel='Aplikační ambice', title='Podíl uchazečů a jejich ambice podle zastoupení dívek')
+fig.tight_layout()
+
+figpath = savefig(fig, f'ss_podil_uchazecu_ambice_divky')
+doc.add_picture(figpath, width=CHART_WIDTH)
+
+doc.add_paragraph('')
+doc.add_paragraph('Uchazeči o pedagogické obory pochází především ze škol, které mají relativně vysoký podíl zájemců o studium na VŠ mezi absolventy a vyšší aplikační ambice (což je dáno také tím, že pedagogické obory jsou poměrně selektivní). Na mnoha gymnáziích se uchází o pedagogický obor alespoň čtvrtina studentů, u některých středních odborných škol je to i více než polovina studentů (převážně pedagogické střední školy).')
+doc.add_paragraph('')
+
+fig, ax = plt.subplots()
+pal = ['#fdae61', '#abd9e9', '#4575b4']
+sns.scatterplot(data=ss21[ss21['podil_uchazecu'] <= 1.2], x='podil_uchazecu_pct', y='aki4_podil_prijat_pct', hue='podil_ped_uchazecu_z_uchazecu_disc', size='absolventi_celkem', sizes=(5, 200), alpha=1, ec='black', palette=pal)
+handles, _ = ax.get_legend_handles_labels()
+ax.legend(handles[1:4], [r'<25 %', r'25 % – 50 %', r'>50 %'], title='Podíl ped. uchazečů')
+ax.xaxis.set_major_formatter(mpl.ticker.PercentFormatter())
+ax.yaxis.set_major_formatter(mpl.ticker.PercentFormatter())
+ax.set(xlabel='Podíl absolventů ucházejících se o VŠ', ylabel='Aplikační ambice', title='Podíl uchazečů, jejich ambice a podíl zájemců o pedagogické obory')
+fig.tight_layout()
+
+figpath = savefig(fig, f'ss_podil_uchazecu_ambice_ped')
+doc.add_picture(figpath, width=CHART_WIDTH)
+
+doc.add_paragraph('')
+doc.add_paragraph('Rozdíly mezi středními školami ukazuje i následující graf, který dává do vztahu aplikační ambice studentů dané střední školy (opět vyjádřené jako průměrná míra přijetí na oborech, kam se studenti hlásí) a podíl uchazečů o pedagogické obory (z počtu uchazečů o studium na VŠ). Zatímco gymnázia tvoří střední část grafu (ambiciózní studenti ve svých přihláškách, střední množství zájemců o pedagogické obory), střední odborné školy se zde jasně rozpadají do tří rozdílných skupin:')
+doc.add_paragraph('Techničtěji zaměřené střední školy tvoří pravou část grafu: technické vysokoškolské obory zpravidla nejsou selektivní, o pedagogické obory na těchto školách není zájem.', style='Bullet List')
+doc.add_paragraph('Pedagogicky zaměřené střední školy tvoří horní část grafu: studenti zpravidla pokračují v pedagogickém zaměření i na VŠ, které jsou poměrně selektivní. Další graf srovnává, jak by se aplikační ambice SŠ změnily, kdyby při jejich výpočtu nebyly zahrnuty pedagogické obory.', style='Bullet List')
+doc.add_paragraph('Levou spodní část grafu tvoří střední školy, jejichž studenti se hlásí na velice selektivní obory a zároveň nemají zájem o učitelství. Jedná se o střední zdravotnické školy a umělecky zaměřené školy.')
+doc.add_paragraph('')
+
+fig, ax = plt.subplots()
+sns.scatterplot(data=ss21, x='aki4_podil_prijat_pct', y='podil_ped_uchazecu_z_uchazecu_pct', hue='ss_typ', size='absolventi_celkem', sizes=(5, 200), alpha=0.8, ec='black')
+handles, labels = ax.get_legend_handles_labels()
+ax.legend(handles[1:4], labels[1:4], title='Typ střední školy')
+ax.xaxis.set_major_formatter(mpl.ticker.PercentFormatter())
+ax.yaxis.set_major_formatter(mpl.ticker.PercentFormatter())
+ax.set(xlabel='Aplikační ambice', ylabel='Podíl uchazečů o pedagogické obory', title='Podíl uchazečů o pedagogické obory a aplikační ambice')
+fig.tight_layout()
+
+figpath = savefig(fig, f'ss_ambice_podil_ped_uchazecu_1')
+doc.add_picture(figpath, width=CHART_WIDTH)
+
+fig, ax = plt.subplots()
+sns.scatterplot(data=ss21, x='aki4_podil_prijat_no_ped_pct', y='podil_ped_uchazecu_z_uchazecu_pct', hue='ss_typ', size='absolventi_celkem', sizes=(5, 200), alpha=0.8, ec='black')
+handles, labels = ax.get_legend_handles_labels()
+ax.legend(handles[1:4], labels[1:4], title='Typ střední školy')
+ax.xaxis.set_major_formatter(mpl.ticker.PercentFormatter())
+ax.yaxis.set_major_formatter(mpl.ticker.PercentFormatter())
+ax.set(xlabel='Aplikační ambice (bez pedagogických oborů)', ylabel='Podíl uchazečů o pedagogické obory', title='Podíl uchazečů o pedagogické obory a aplikační ambice')
+fig.tight_layout()
+
+figpath = savefig(fig, f'ss_ambice_podil_ped_uchazecu_2')
+doc.add_picture(figpath, width=CHART_WIDTH)
+
+#endregion
+
+# 8. PROFIL UCHAZEČŮ O PEDAGOGICKÉ FAKULTY
 #region
 doc.add_heading(f'{h.h1} Profil uchazečů o pedagogické fakulty', 1)
 
@@ -1415,7 +1747,7 @@ doc.add_picture(figpath, width=CHART_WIDTH)
 
 #endregion
 
-# 7. ÚSPĚŠNOST UCHAZEČŮ O PEDAGOGICKÉ FAKULTY
+# 9. ÚSPĚŠNOST UCHAZEČŮ O PEDAGOGICKÉ FAKULTY
 #region
 doc.add_heading(f'{h.h1} Úspěšnost uchazečů o pedagogické fakulty', 1)
 
@@ -1549,23 +1881,227 @@ doc.show()
 # efekt vzdalenosti?
 # kam se zak zapsal, kdyz byl prijat na vice nez jednu skolu
 
+# ABSOLVENTI
+os.getcwd()
+
+zaci = pd.read_excel("../data/uchazec/absolventi_ss.xlsx")
+ab_raw = pd.read_excel("../data/uchazec/absolventi_ss.xlsx", sheet_name="List3")
+ab = ab_raw.groupby('red_izo')[['absolventi_celkem', 'absolventi_divky']].sum().reset_index().rename(columns={"red_izo": "ss_red_izo"})
+
+# df21 = pd.merge(df21, ab, how='left')
+
+ped_col = 'ped_obor'
+vars_to_sum = ['prihl_bool', 'prijat_bool', 'zapis_bool', f'prihl_{ped_col}_bool', f'prijat_{ped_col}_bool', f'zapis_{ped_col}_bool']
+foo = po21.groupby(['gender', 'ss_red_izo'])[vars_to_sum].sum()
+
+foo = foo.unstack(level=0).fillna(0).reset_index()
+sfx = {'': '', 'Chlapec': '_chlapec', 'Dívka': '_divka'}
+foo.columns = [x + sfx[y] for x, y in foo.columns]
+
+foo = pd.merge(foo, ab, how='left')
+foo = foo.rename(columns={'absolventi_divky': 'absolventi_divka'})
+foo['absolventi_chlapec'] = foo['absolventi_celkem'] - foo['absolventi_divka']
+
+for x in vars_to_sum:
+    foo[f'{x}_celkem'] = foo[f'{x}_divka'] + foo[f'{x}_chlapec']
+
+isc21['aki4_podil_prijat'] = isc21['prijat'] / isc21['total']
+aki4 = isc21[['aki4', 'aki4_podil_prijat']]
+df21 = pd.merge(df21, aki4, how='left')
+
+ss_ambice = df21.groupby('ss_red_izo')[['aki4_podil_prijat', 'w']].apply(nanaverage, weights='w').reset_index()
+ss_ambice2 = df21[~df21['ped_obor']].groupby('ss_red_izo')[['aki4_podil_prijat', 'w']].apply(nanaverage, weights='w').reset_index().rename(columns={'aki4_podil_prijat': 'aki4_podil_prijat_no_ped'})
+ss21 = pd.merge(foo, ss_ambice)
+ss21 = pd.merge(ss21, ss_ambice2, how='left')
+
+ss_kraj = df21[['ss_red_izo', 'ss_kraj']].drop_duplicates().dropna()
+ss21 = pd.merge(ss21, ss_kraj)
+
+foo = po21[['ss_red_izo', 'ss_typ']].drop_duplicates().dropna()
+foo = foo[~foo['ss_typ'].isin(['Není SŠ', 'Jiné'])]
+bar = foo['ss_red_izo'].value_counts()
+multiple = bar[bar > 1]
+foo = foo[~foo.ss_red_izo.isin(multiple.index)]
+
+ss21 = pd.merge(ss21, foo, how='left')
+ss21['ss_typ'] = ss21['ss_typ'].fillna('Jiné')
+
+# now I should be able to compute everything
+
+
+
+
+bar = po21[['ss_red_izo', 'ss_kraj', 'ss_typ', 'ss_typ_g']].drop_duplicates().dropna()
+bar[bar['ss_red_izo'] == 600014321]
+
+ss21['podil_uchazecu'] = ss21['prihl_bool_celkem'] / ss21['absolventi_celkem']
+ss21['podil_ped_uchazecu'] = ss21[f'prihl_{ped_col}_bool_celkem'] / ss21['absolventi_celkem']
+ss21['podil_ped_uchazecu_z_uchazecu'] = ss21[f'prihl_{ped_col}_bool_celkem'] / ss21['prihl_bool_celkem']
+#ss21['ppuzu_disc'] = pd.cut(ss21['podil_ped_uchazecu_z_uchazecu'], bins=4)
+ss21['ppuzu_disc'] = pd.cut(ss21['podil_ped_uchazecu_z_uchazecu'], bins=[-0.001, 0.25, 0.5, 1.001])
+ss21['podil_divek'] = ss21['absolventi_divka'] / ss21['absolventi_celkem']
+ss21['podil_divek_disc'] = pd.cut(ss21['podil_divek'], bins=[-0.001, 0.3, 0.7, 1.001])
+
+to_drop = ['ppuzu_disc', 'podil_divek_disc']
+
+weird = ss21[ss21['podil_uchazecu'] > 1]
+weird.drop(columns=to_drop).show('weird')
+
+# import warnings
+# warnings.simplefilter(action='ignore', category=FutureWarning)
+
+# priklady problematickych RED IZO skol:
+# - 600007472: 1 absolvent, 0 zaku, ale v datech mame 16 uchazecu
+# - 600005666: 1 absolvent, 171 zaku (to je trochu podezrele), mame 15 uchazecu
+# - 600005836: 7 absolventu, 141 zaku, 43 uchazecu
+
+# toto jsou nejkriklavejsi pripady, celkem je temer sto skol, kde mame vyssi pocet uchazecu nez absolventu. ackoli u vetsiny z nich jsou ty rozdily male, o 1-2 zaky
+
+# zaci[zaci.red_izo == 600007472]
+# zaci[zaci.red_izo == 600005666]
+# ab_raw[ab_raw.red_izo == 600005666].T
+# df21[df21.ss_red_izo == 600005666].show()
+# ab_raw[ab_raw.p_izo == 10622110]
+# ab_raw[ab_raw.red_izo == 600005836]
+# zaci[zaci.red_izo == 600005836]
+
+sns.scatterplot(data=ss21[ss21['podil_uchazecu'] <= 1.2], x='podil_uchazecu', y='aki4_podil_prijat', hue='podil_ped_uchazecu_z_uchazecu').show()
+sns.scatterplot(data=ss21[ss21['podil_uchazecu'] <= 1.2], x='podil_uchazecu', y='aki4_podil_prijat', hue='ppuzu_disc', size='absolventi_celkem', sizes=(5, 200), alpha=0.8).show()
+sns.scatterplot(data=ss21[ss21['podil_uchazecu'] <= 1.2], x='podil_uchazecu', y='aki4_podil_prijat', hue='podil_divek_disc', size='absolventi_celkem', sizes=(5, 200), alpha=0.8).show()
+sns.scatterplot(data=ss21[ss21['podil_uchazecu'] <= 1.2], x='podil_uchazecu', y='aki4_podil_prijat', hue='ss_kraj', size='absolventi_celkem', sizes=(5, 200), alpha=0.8).show()
+sns.scatterplot(data=ss21[ss21['podil_uchazecu'] <= 1.2], x='podil_uchazecu', y='aki4_podil_prijat', hue='ss_kraj', size='absolventi_celkem', sizes=(5, 200), alpha=0.8).show()
+sns.scatterplot(data=ss21[ss21['podil_uchazecu'] <= 1.2], x='podil_uchazecu', y='aki4_podil_prijat', hue='ss_typ', size='absolventi_celkem', sizes=(5, 200), alpha=0.8).show()
+
+sns.scatterplot(data=ss21, x='aki4_podil_prijat', y='podil_ped_uchazecu_z_uchazecu', hue='ss_typ', size='absolventi_celkem', sizes=(5, 200), alpha=0.8).show()
+sns.scatterplot(data=ss21, x='aki4_podil_prijat_no_ped', y='podil_ped_uchazecu_z_uchazecu', hue='ss_typ', size='absolventi_celkem', sizes=(5, 200), alpha=0.8).show()
+
+ss21.groupby('ss_kraj')[['absolventi_celkem', 'podil_divek', 'podil_uchazecu', 'podil_ped_uchazecu', 'aki4_podil_prijat']].apply(nanaverage, weights='absolventi_celkem').reset_index()
+
+
+fig, ax = plt.subplots()
+sns.lineplot(x=range(10), y=range(10), marker='o')
+fig.show()
+
+
+ss21['absolventi_celkem'] = ss21['absolventi_celkem'].fillna(0)
+
+ss21.groupby('ss_kraj')[['absolventi_celkem', 'podil_divek', 'podil_uchazecu', 'podil_ped_uchazecu', 'aki4_podil_prijat']].apply(nanaverage, weights='absolventi_celkem').reset_index().show()
+ss21.groupby('ss_kraj')[['absolventi_celkem', 'podil_divek', 'podil_uchazecu', 'podil_ped_uchazecu', 'aki4_podil_prijat']].apply(nanaverage, weights='absolventi_celkem').reset_index()
+
+
+
+ss21.groupby('ss_kraj')[['absolventi_celkem', 'aki4_podil_prijat']].apply(nanaverage, weights='absolventi_celkem').reset_index()
+ss21.groupby('ss_kraj')[['absolventi_celkem', 'aki4_podil_prijat']].average()
+
+for k, v in ss21.groupby('ss_kraj')[['absolventi_celkem', 'aki4_podil_prijat']].groups.items():
+    break
+
+k
+v
+x = ss21.iloc[v]
+weights = 'absolventi_celkem'
+
+w = x[weights]
+x = x.drop(columns=[weights])
+mask = np.isnan(x)
+xm = np.ma.masked_array(x, mask=mask)
+if len(x.shape) == 1:
+    return np.ma.average(xm, weights=w)
+else:
+    res = np.ma.average(xm, weights=w, axis=0)
+    return pd.Series(res, x.columns) if isinstance(x, pd.DataFrame) else res
+
+w
+
+po21
+
+
+
+
+df21.shape
+np.sum(df21.ss_red_izo == 600020070)
+df21.show()
+
+ab.p_izo.dtype
+df21.ss_izo.dtype
+
+pd.isna(df21.ss_izo).sum()
+
+redizo = 600020070
+
+redizo in ab.red_izo.dtype
+
+ab[ab.red_izo == redizo]
+
+df_izos = df21[["ss_red_izo"]].value_counts().rename('count').reset_index().rename(columns={"ss_red_izo": "red_izo"})
+foo = pd.merge(ab[["red_izo"]].drop_duplicates(), df_izos, how="outer", indicator=True)
+
+foo.groupby("_merge")["count"].sum()
+foo.show(num_rows=1500)
+foo["_merge"].value_counts()
+
+
+df_izos = df21[["ss_red_izo"]].drop_duplicates().rename(columns={"ss_red_izo": "p_izo"})
+foo = pd.merge(ab[["p_izo"]].drop_duplicates(), df_izos, how="outer", indicator=True)
+foo.show()
+
+foo["_merge"].value_counts()
+
+df21[df21['ss_red_izo'] == 691001197]['ss_izo'].drop_duplicates()
+
+sys_root = 'D:\\' if sys.platform == 'win32' else '/mnt/d'
+data_root = os.path.join(sys_root, 'projects', 'idea', 'data')
+
+li = []
+for y in range(1999, 2023):
+    pdf = pd.read_csv(f'{data_root}/uchazec/stredni-skoly/m{y}.csv', encoding='cp1250')
+    pdf['year'] = y
+    li.append(pdf)
+ss = pd.concat(li, axis=0, ignore_index=True).drop_duplicates().reset_index(drop=True)
+ss = ss.sort_values('year', ascending=False).drop_duplicates('IZO').sort_index()
+ss['OBOR'] = ss['OBOR'].str.strip()
+
+sss = ss[['IZO', 'VUSC']].drop_duplicates().reset_index(drop=True)       
+sss.shape    
+
+ssss = ss[['IZO', 'VUSC', 'RED_IZO']].drop_duplicates().reset_index(drop=True)       
+ssss.shape    
+
+
+# year can be 17 or 21
+year = 21
+path = os.path.join(data_root, 'uchazec', f'0022MUCH{year}P')
+df = pd.read_csv(f'{path}.csv', encoding='cp1250', low_memory=False)
+df.columns
+
+
+
+
+df_izos = df21[["ss_izo"]].value_counts().rename('count').reset_index().rename(columns={"ss_izo": "p_izo"})
+foo = pd.merge(ab[["p_izo"]].drop_duplicates(), df_izos, how="outer", indicator=True)
+
+foo.groupby("_merge")["count"].sum()
+foo.show(num_rows=1500)
+
+
+
+
+
+
+
+
 # KAM SE ZAPSAL
+#region
 ped_col = 'ped_obor'
 y = 21
 ff = eval(f'po{y}').copy()
 df = eval(f'df{y}').copy()
 isc = eval(f'isc{y}').copy()
 
-ff.show('ff')
-
-foo_ff = ff[(ff[f'prijat_{ped_col}'] > 0) & (ff['prijat'] > 1)].copy()
-
-foo = df[df['id'].isin(foo_ff['id'])]
-foo.show('foo')
 
 # ...
 foo = df[df['prijat']].copy()
-akivar = 'aki2'
+akivar = 'aki4'
 foo_id = foo[['id', akivar]].drop_duplicates()['id'].value_counts()
 foo_id_mult = foo_id[foo_id > 1].index
 
@@ -1573,29 +2109,12 @@ foo = foo[foo['id'].isin(foo_id_mult)].copy()
 bar = foo.groupby(['id', akivar])['zaps_zapsal'].sum().reset_index()
 bar['pref'] = np.where(bar['zaps_zapsal'] > 0.5, 1, -1)
 
-aki2s = df['aki2'].drop_duplicates().dropna().sort_values().values
+akis = isc[akivar].drop_duplicates().dropna().sort_values().values
 
 barpr = bar.pivot(index='id', columns=akivar, values='pref').fillna(0).astype(int)
 barpr['min'] = barpr.min(axis=1)
 barpr['max'] = barpr.max(axis=1)
 barpr = barpr[(barpr['min'] == -1) & (barpr['max'] == 1)].drop(columns=['min', 'max'])
-
-prefs = pd.DataFrame(np.full([len(aki2s), len(aki2s)], 0), index=aki2s, columns=aki2s)
-tots = pd.DataFrame(np.full([len(aki2s), len(aki2s)], 0), index=aki2s, columns=aki2s)
-
-# 14 s -> I need to get it <1s
-start = datetime.now()
-for _, row in barpr.iterrows():    
-    plus = row[row > 0].index
-    minus = row[row < 0].index
-    prefs.loc[plus, minus] += 1
-    #prefs.loc[minus, plus] -= 1
-    tots.loc[plus, minus] += 1
-    tots.loc[minus, plus] += 1
-print(f'{datetime.now() - start} s')
-
-akis = aki2s
-data = barpr
 
 def comp_prefs(data, akis):
     assert data.shape[1] == len(akis)
@@ -1609,81 +2128,45 @@ def comp_prefs(data, akis):
     np.apply_along_axis(inner, 1, data.values)
     return prefs, tots
 
-x = np.array([1, -1, 1, 0, -1, 0, -1, 0, 0, 0])
-
-prefs[np.nonzero(x > 0), np.nonzero(x < 0)]
-
-prefs[np.outer(x > 0, x < 0)] += 1
-
-prefs[np.argmax(x)]
-
-prefs[[0, 2], [1, 4, 6]]
-
-
-prefs[itertools.product([0, 2], [1, 4, 6])]
-
-np.isnan(data).sum()
-
 start = datetime.now()
-prefs, tots = comp_prefs(barpr, aki2s)
+akis = barpr.columns.values
+prefs, tots = comp_prefs(barpr, akis)
 print(f'{datetime.now() - start} s')
 
-prefs = pd.DataFrame(prefs, index=aki2s, columns=aki2s)
-tots = pd.DataFrame(tots, index=aki2s, columns=aki2s)
-prefs.oindex
+prefs = pd.DataFrame(prefs, index=akis, columns=akis)
+tots = pd.DataFrame(tots, index=akis, columns=akis)
 
-prefs
+valid = tots.index[tots.max() >= 10]
+prefs = prefs[valid].loc[valid]
+tots = tots[valid].loc[valid]
 
-row.values
+akis = tots.columns.values
 
-xx = prefs.values
-xx[:] = 0
+aki_dict = isc[[akivar, 'isced' + akivar[-1]]].drop_duplicates().set_index(akivar)['isced' + akivar[-1]].to_dict()
+aki_dict_short = {k: v + ' [' + k + ']' if len(v) < 20 else v[:18] + '... [' + k + ']' for k, v in aki_dict.items()}
 
-x = row.values
-np.nonzero(x > 0)
-xx[x > 0, x < 0] += 1
-
-prefs
-tots
-
-prefs_pct = 100 * prefs / tots
-
-aki2_dict = isc[['aki2', 'isced2']].drop_duplicates().set_index('aki2')['isced2'].to_dict()
-aki2_dict_short = {k: v if len(v) < 20 else v[:18] + '...' for k, v in aki2_dict.items()}
-
-prefs_pct.columns = prefs_pct.columns.map(aki2_dict_short)
-prefs_pct.index = prefs_pct.index.map(aki2_dict_short)
-
-mask = pd.DataFrame(np.eye(len(aki2s), dtype='bool'), columns=conf.columns, index=conf.index)
-
-fig, ax = plt.subplots()
-sns.heatmap(prefs_pct, annot=True, mask=mask, cmap='RdYlBu', fmt='.1f')
-ax.set(xlabel=None, ylabel=None, title='Revealed Preferences při zápisu do oborů')
-fig.tight_layout()
-fig.show()
-
+len(akis)
+len(isc['aki4'].drop_duplicates().dropna().sort_values().values)
 
 rp = pd.merge(tots.stack().rename('tot').reset_index(), prefs.stack().rename('pref').reset_index())
 rp['ppct'] = 100 * rp['pref'] / rp['tot']
-rp['x'] = rp['level_1'].map(aki2_dict_short)
-rp['y'] = rp['level_0'].map(aki2_dict_short)
+rp['ppct_fltr'] = np.where(rp['tot'] < 10, np.nan, rp['ppct'])
+rp['x'] = rp['level_1'].map(aki_dict_short)
+rp['y'] = rp['level_0'].map(aki_dict_short)
 rp = rp.dropna(subset='ppct')
-rp['log_tot'] = np.log(rp['tot'])
 rp['sqrt_tot'] = np.sqrt(rp['tot'])
-rp['cap_tot'] = np.minimum(rp['tot'], 500)
 
-isced2s = [aki2_dict_short[x] for x in aki2s]
+isceds = [aki_dict_short[x] for x in akis]
 
-rp['x'] = pd.Categorical(rp['x'], categories=isced2s, ordered=True)
-rp['y'] = pd.Categorical(rp['y'], categories=isced2s, ordered=True)
+rp['x'] = pd.Categorical(rp['x'], categories=isceds, ordered=True)
+rp['y'] = pd.Categorical(rp['y'], categories=isceds, ordered=True)
 
-min_tot, max_tot = rp['tot'].min(), rp['tot'].max()
-
-fig, ax = plt.subplots()
-sns.scatterplot(data=rp, x='x', y='y', hue='ppct', palette='RdYlBu', size='sqrt_tot', sizes=(5, 3000))
+fig, ax = plt.subplots(figsize=(30, 18))
+sns.scatterplot(data=rp, x='x', y='y', hue='ppct_fltr', palette='RdYlBu', size='sqrt_tot', sizes=(5, 3000))
 for _, row in rp.iterrows():
-    color, alpha = ('black', 0.8) if 25 < row['ppct'] < 75 else ('white', 1)
-    ax.text(x=row['x'], y=row['y'], s=f'{row["ppct"]:.0f}', va='center', ha='center', alpha=alpha, color=color)
+    if not pd.isna(row['ppct_fltr']):
+        color, alpha = ('black', 0.8) if 25 < row['ppct'] < 75 else ('white', 1)
+        ax.text(x=row['x'], y=row['y'], s=f'{row["ppct"]:.0f}', va='center', ha='center', alpha=alpha, color=color)
 ax.set(xlabel=None, ylabel=None, title='Revealed Preferences při zápisu do oborů')
 plt.xticks(rotation=30, ha='right')
 plt.legend([],[], frameon=False)
@@ -1889,7 +2372,7 @@ fig.show()
 
 
 
-
+#endregion
 # OLDER STUFF
 #region
 
@@ -2264,7 +2747,9 @@ raw17[raw17['obor1'].str.startswith('7504')].show('raw17_7504', num_rows=5_000)
 #region
 
 # plain: chlapci 63 %, dívky 47 %
-df21.groupby('gender')[['vypr_flag', 'w']].apply(nanaverage, weights='w')
+df21.groupby('gender')[['prijat', 'w']].apply(nanaverage, weights='w')
+
+
 
 df21[df21['pedf']].groupby('gender')[['vypr_flag', 'w']].apply(nanaverage, weights='w')
 df21.shape
@@ -2273,18 +2758,28 @@ df21[df21['pedf_isc']].groupby('gender')[['vypr_flag', 'w']].apply(nanaverage, w
 
 
 # správně bych ale měl porovnávat přímo obory
-stata.pdataframe_to_data(df21)
+stata.pdataframe_to_data(df17, force=True)
 
 %%stata
 encode aki4, gen(aki4c)
 encode gender, gen(genderc)
-logit vypr_flag genderc i.aki4c [pw=w]
+logit prijat genderc i.aki4c [pw=w]
+
+%stata logit prijat genderc [pw=w]
+
 
 %stata logit vypr_flag genderc i.aki4c [pw=w]
-%stata logit vypr_flag genderc [pw=w]
 
 
 %stata logit vypr_flag genderc i.aki4c [pw=w]
+
+logistic(-0.0580242)
+logistic(-0.102552)
+
+po21['gender'].value_counts()
+po21.columns
+
+po21[po21['zapis_bool']]['gender'].value_counts()
 
 
 logistic(1.138966)
@@ -3232,3 +3727,4 @@ Document()
 #endregion
 
 #endregion
+
