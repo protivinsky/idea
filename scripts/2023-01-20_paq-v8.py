@@ -649,7 +649,7 @@ bins = np.linspace(minmax[0] - eps, minmax[1] + eps, n_bins)
 
 pd.cut(row, bins, labels=False)
 
-def colored_html_table(table, minmax=None, shared=True, cmap='RdYlGn', n_bins=51, doc=None, eps=1e-8, formatter=None):
+def colored_html_table(table, minmax=None, shared=True, cmap='RdYlGn', n_bins=51, doc=None, eps=1e-8, formatter=None, label_width=None):
     if shared:
         if minmax is None:
             minmax = (x.min().min(), x.max().max())
@@ -677,7 +677,10 @@ def colored_html_table(table, minmax=None, shared=True, cmap='RdYlGn', n_bins=51
                 cidx = pd.cut(row, bins, labels=False)
 
                 with doc.tag('tr'):
-                    doc.line('td', i, klass='row_label')
+                    if label_width is not None:
+                        doc.line('td', i, klass='row_label', width=f'{label_width}px')
+                    else:
+                        doc.line('td', i, klass='row_label')
                     for r, ci in zip(row, cidx):
                         if formatter is not None:
                             if isinstance(formatter, Callable):
@@ -726,11 +729,11 @@ df['ones'] = 1.
 
 
 def row_freq(data, col, row, weight='ones'):
-    table = df.groupby([col, row])[weight].sum().unstack().T
+    table = data.groupby([col, row])[weight].sum().unstack().T
     return table / table.sum(axis=1).values[:, np.newaxis]
 
 def col_freq(data, col, row, weight='ones'):
-    table = df.groupby([col, row])[weight].sum().unstack().T
+    table = data.groupby([col, row])[weight].sum().unstack().T
     return table / table.sum(axis=0).T
 
 def gen_freq_table(freq_fun, col, row, weight='vahy', **kwargs):

@@ -564,7 +564,6 @@ OMean.of_groupby(df, 'nQ471_r1', 'rrnQ468_r2', 'vahy')
 
 foo = OMean.of_groupby(df, ['nQ471_r1', 'vlna_datum'], 'rrnQ468_r2', 'vahy').apply(lambda x: x.mean).reset_index()
 
-sns.lineplot(data=foo, x='vlna_datum', )
 
 fig, ax = plt.subplots(figsize=(10, 5))
 for i in range(1, 5):
@@ -619,13 +618,8 @@ colors = sns.color_palette('RdYlGn', n_colors=7)
 cmap = mpl.colors.ListedColormap(colors[1:-1])
 #cmap = 'RdYlGn'
 
-figs = []
-for i in range(1, 5):
-    fig = categorical_over_groups(df, col_labels, col_value_labels, f'rnQ468_r{i}', 'vlna_datum', g_map=g_map,
-                                  c_annotate=True, cmap=cmap)
-    figs.append(fig)
-
-rt.Leaf(figs, title=col_labels['rnQ468_r1'].split('|')[0].strip()).show()
+categorical_over_groups(df, col_labels, col_value_labels, 'rnQ469_r3', 'vlna_datum', g_map=g_map,
+                              c_annotate=True, cmap=cmap).show()
 
 
 # region # FINAL REPORT
@@ -806,6 +800,7 @@ doc.image(fig)
 cmap = mpl.colors.ListedColormap(colors[1:4:2] + [colors[-4]])
 fig = categorical_over_groups(df, col_labels, col_value_labels, 'rnQ519_r1', 'vlna_datum', g_map, c_annotate=range(2),
                               cumulative=True, cmap=cmap)
+
 doc.image(fig)
 
 doc.md('## Ochota přijmout uprchlíky z Ukrajiny v případě potřeby\n\n')

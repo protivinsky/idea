@@ -1,8 +1,12 @@
 # https://github.com/tofsjonas/sortable
 import shutil
-from reportree.io import IWriter, LocalWriter
+from typing import Callable
+import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-from yattag import indent
+import seaborn as sns
+from yattag import indent, Doc
+from reportree.io import IWriter, LocalWriter
 
 
 sortable_js_min = r"""document.addEventListener("click",function(b){try{var p=function(a){return v&&a.getAttribute("data-sort-alt")||a.getAttribute("data-sort")||a.innerText},q=function(a,c){a.className=a.className.replace(w,"")+c},f=function(a,c){return a.nodeName===c?a:f(a.parentNode,c)},w=/ dir-(u|d) /,v=b.shiftKey||b.altKey,e=f(b.target,"TH"),r=f(e,"TR"),g=f(r,"TABLE");if(/\bsortable\b/.test(g.className)){var l,d=r.cells;for(b=0;b<d.length;b++)d[b]===e?l=e.getAttribute("data-sort-col")||b:q(d[b],"");d=" dir-d ";if(-1!==
@@ -190,6 +194,13 @@ sortable_css = """@charset "UTF-8";
 }
 """
 
+color_table_css = """
+.color_table td, .color_table th {
+    padding: 8px
+}
+"""
+
+
 def add_content_head(doc, title):
     with doc.tag('head'):
         doc.stag('meta', charset='UTF-8')
@@ -227,66 +238,53 @@ def add_sortable_table(doc, table, klass=None):
                         else:
                             doc.line('td', f'{row[c]:.1f}')
 
-import reportree as rt
-import os
-from typing import Optional
-import re
+
+def colored_html_table(table, minmax=None, shared=True, cmap='RdYlGn', n_bins=51, doc=None, eps=1e-8, formatter=None,
+                       label_width=None):
+    if shared:
+        if minmax is None:
+            minmax = (table.min().min(), table.max().max())
+            minmax = (1.5 * minmax[0] - 0.5 * minmax[1], 1.5 * minmax[1] - 0.5 * minmax[0])
+        bins = [-np.inf] + list(np.linspace(minmax[0] - eps, minmax[1] + eps, n_bins - 2)[1:-1]) + [np.inf]
+
+    if doc is None:
+        doc = Doc()
+
+    if not isinstance(cmap, list):
+        cmap = sns.color_palette(cmap, n_colors=n_bins).as_hex()
+
+    with doc.tag('table', klass='color_table'):
+        with doc.tag('thead'):
+            with doc.tag('tr'):
+                doc.line('th', '')
+                for c in table.columns:
+                    doc.line('th', c)
+        with doc.tag('tbody'):
+            for i, row in table.iterrows():
+                if not shared:
+                    minmax = (row.min(), row.max())
+                    minmax = (1.5 * minmax[0] - 0.5 * minmax[1], 1.5 * minmax[1] - 0.5 * minmax[0])
+                    bins = [-np.inf] + list(np.linspace(minmax[0] - eps, minmax[1] + eps, n_bins - 2)[1:-1]) + [np.inf]
+
+                cidx = pd.cut(row, bins, labels=False)
+
+                with doc.tag('tr'):
+                    if label_width is not None:
+                        doc.line('td', i, klass='row_label', width=f'{label_width}px')
+                    else:
+                        doc.line('td', i, klass='row_label')
+                    for r, ci in zip(row, cidx):
+                        if formatter is not None:
+                            if isinstance(formatter, Callable):
+                                r = formatter(r)
+                            else:
+                                r = formatter.format(r)
+                        elif isinstance(r, float):
+                            r = f'{r:.3g}'
+                        doc.line('td', r, bgcolor=cmap[ci])
+
+    return doc
 
 
-class ReportTreePath(rt.IRTree):
-    """(Lazily) load report from a given path. The report is copied to the destination folder only on save.
-    This class is not implemented yet.
-    """
-    def __init__(self, path: str, entry: Optional[str] = None, title: Optional[str] = None):
-        entry = entry or 'index.htm'
-        if os.path.isfile(path):
-            entry = os.path.basename(path)
-            path = os.path.dirname(path)
-        self._path = path
-        self._entry = entry
-        if title is None:
-            with open(os.path.join(self._path, self._entry), 'r', encoding='utf-8') as f:
-                title_search = re.search('<title>(.*)</title>', f.read())
-            if title_search:
-                title = title_search.group(1)
-            else:
-                title = 'ReportTree Path'
-        self._title = title
 
-    def save(self, path: str, writer=None, entry: str = 'index.htm'):
-        # support for writers is not implemented yet
-        os.makedirs(path, exist_ok=True)
-        for x in os.listdir(self._path):
-            x = os.path.join(self._path, x)
-            # rename entry point
-            if os.path.normpath(x) == os.path.normpath(os.path.join(self._path, self._entry)):
-                shutil.copy2(x, os.path.join(path, entry))
-            else:
-                if os.path.isfile(x):
-                    shutil.copy2(x, path)
-                elif os.path.isdir(x):
-                    shutil.copytree(x, path)
-
-
-class InjectWriter(IWriter):
-    """Writer that injects a certain text before a provided pattern.
-    """
-
-    _pattern = '</head>'
-    _value = f"""<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Libre+Franklin" />""" \
-            f"""<style>{base_css}</style>"""
-    _writer = LocalWriter
-
-    def __init__(self, pattern=_pattern, value=_value, writer=_writer):
-        self.pattern = pattern
-        self.value = value
-        self.writer = writer
-
-    def write_text(self, path: str, text: str):
-        text = text.replace(self.pattern, self.value + self.pattern)
-        text = indent(text)
-        self.writer.write_text(path, text)
-
-    def write_figure(self, path: str, figure: plt.Figure):
-        self.writer.write_figure(path, figure)
 

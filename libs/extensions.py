@@ -6,8 +6,7 @@ import tempfile
 from yattag import Doc, indent
 from datetime import datetime
 from libs.utils import create_stamped_temp, get_stamp, create_temp_dir
-from libs.plots import Chart
-from libs.rt_content import base_css, ReportTreePath, InjectWriter
+from libs.rt_content import base_css, color_table_css
 from libs.projects.paq import fig_to_image_data
 import reportree as rt
 import docx
@@ -41,14 +40,18 @@ def docx_document_show(self, **kwargs):
     _open(path)
 
 
-def rtree_show(t: rt.IRTree, entry='index.htm', writer=InjectWriter()):
+_custom_head = f"""<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Libre+Franklin" />""" \
+        f"""<style>{base_css}{color_table_css}</style>"""
+_rtree_writer = rt.io.InjectWriter(value=_custom_head)
+
+
+def rtree_show(t: rt.IRTree, entry='index.htm', writer=_rtree_writer):
     path = create_stamped_temp('reports')
     t.save(path, entry=entry, writer=writer)
     _open(os.path.join(path, entry), 'firefox')
 
 
 rt.IRTree.show = rtree_show
-rt.Path = ReportTreePath
 
 
 def figure_show(self, title=None):
