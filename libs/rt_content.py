@@ -109,7 +109,7 @@ body {
   font-size: 90%;
   font-weight: 300;
   margin: 20px 40px;
-  width: 1280px;
+  // width: 1280px;
 }
 
 b, strong {
@@ -124,6 +124,7 @@ code {
   margin-bottom: 6px;
   display: block;
   width: auto;
+  white-space: pre-wrap;
 }
 """
 

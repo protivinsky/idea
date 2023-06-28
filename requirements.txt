@@ -24,3 +24,5 @@ scikit-learn~=1.1.2
 openai~=0.25.0
 pytdigest
 ipython
+world_bank_data
+pycountry

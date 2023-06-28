@@ -515,7 +515,52 @@ def zacleneni_dle_pohlavi():
     return doc
 
 
-def coef_plot_for_stata(stata_output, relabel={}, title=None, figsize=(10, 6)):
+def data_for_stata_output(stata_output, relabel={}):
+    data = []
+    dashed_lines = 0
+    for l in stata_output.split('\n'):
+        if l.startswith('--'):
+            dashed_lines += 1
+            if dashed_lines == 3:
+                break
+        elif dashed_lines == 2:
+            l = l.replace('|', ' ')
+            l = re.sub('  +', '  ', l).strip()
+            l = l.split('  ')
+            if len(l) > 1:
+                l = [l[0]] + [float(x) for x in l[1:]]
+            data.append(l)
+            # if l[0] != '':
+            #     data.append(l)
+
+    reg_cols = ['var', 'coef', 'std_err', 't', 'p', 'lower', 'upper']
+    foo = pd.DataFrame(data, columns=reg_cols)
+    foo = foo.set_index('var')
+    foo['var'] = foo.index
+
+    cons = foo.loc['_cons']
+    foo['coef_cons'] = np.where(foo['var'] != '_cons', foo['coef'] + cons['coef'], foo['coef'])
+    foo['lower_cons'] = np.where(foo['var'] != '_cons', foo['lower'] + cons['coef'], foo['lower'])
+    foo['upper_cons'] = np.where(foo['var'] != '_cons', foo['upper'] + cons['coef'], foo['upper'])
+    foo['sig'] = (foo['lower'] * foo['upper']) > 0
+
+    foo['label'] = foo['var'].apply(lambda x: relabel[x] if x in relabel else x)
+
+    for c in ['coef', 'coef_cons', 'lower_cons', 'upper_cons']:
+        foo[c] = 100 * foo[c]
+
+    cols = {
+        'label': 'Proměnná',
+        'coef': 'Koeficient',
+        'coef_cons': 'Pozice',
+        'lower_cons': 'Dolní mez',
+        'upper_cons': 'Horní mez',
+        'sig': 'Významnost (95%)'
+    }
+    return foo[list(cols)].rename(columns=cols).reset_index(drop=True)
+
+
+def coef_plot_for_stata(stata_output, relabel={}, title=None, figsize=(10, 6), xlabel=''):
     sig_color = 'red'
     nonsig_color = 'gray'
     data = []
@@ -558,13 +603,86 @@ def coef_plot_for_stata(stata_output, relabel={}, title=None, figsize=(10, 6)):
     sns.scatterplot(data=foo, x='coef_cons', y='label', ax=ax, hue='sig', palette={True: sig_color, False: nonsig_color})
     ax.axvline(x=cons['coef'], color='blue')
     ax.xaxis.set_major_formatter(lambda x, _: f'{100 * x:.0f} %')
-    ax.set(xlabel='', ylabel='')
+    ax.set(xlabel=xlabel, ylabel='')
 
     for i, (_, row) in enumerate(foo.iterrows()):
         if np.isfinite(row['coef']):
             # alpha = 1 if row['sig'] else 0.6
             if row['var'] == '_cons':
                 plt.text(x=row['coef_cons'] + 0.002, y=i + 0.3, s=f'{100 * row["coef"]:.1f} %', ha='left', va='top',
+                         color=sig_color if row['sig'] else nonsig_color)
+            else:
+                plt.text(x=row['coef_cons'], y=i - 0.2, s=f'{100 * row["coef"]:+.1f}', ha='center', va='bottom',
+                         color=sig_color if row['sig'] else nonsig_color)
+
+    ax.hlines(data=foo[foo['sig']], y='label', xmin='lower_cons', xmax='upper_cons', color=sig_color)
+    ax.hlines(data=foo[~foo['sig']], y='label', xmin='lower_cons', xmax='upper_cons', color=nonsig_color)
+
+    remove_ticks = np.arange(len(foo))[np.isnan(foo['coef'])]
+    yticks = ax.yaxis.get_major_ticks()
+    for i in remove_ticks:
+        label1On = not yticks[i].label1.get_text().startswith('[empty ')
+        yticks[i]._apply_params(gridOn=False, tick1On=False, label1On=label1On)
+        yticks[i].label1.set_fontweight('bold')
+    ax.get_legend().remove()
+    ax.set_ylim((ax.get_ylim()[0] + 0.25, -0.85))
+
+    if title is not None:
+        ax.set_title(title)
+    fig.tight_layout()
+    return fig
+
+
+def coef_plot_for_stata_pp(stata_output, relabel={}, title=None, figsize=(10, 6)):
+    sig_color = 'red'
+    nonsig_color = 'gray'
+    data = []
+    dashed_lines = 0
+    for l in stata_output.split('\n'):
+        if l.startswith('--'):
+            dashed_lines += 1
+            if dashed_lines == 3:
+                break
+        elif dashed_lines == 2:
+            l = l.replace('|', ' ')
+            l = re.sub('  +', '  ', l).strip()
+            l = l.split('  ')
+            if len(l) > 1:
+                l = [l[0]] + [float(x) for x in l[1:]]
+            data.append(l)
+            # if l[0] != '':
+            #     data.append(l)
+
+    reg_cols = ['var', 'coef', 'std_err', 't', 'p', 'lower', 'upper']
+    foo = pd.DataFrame(data, columns=reg_cols)
+    for i in range(len(foo)):
+        if foo.loc[i, 'var'] == '':
+            foo.loc[i, 'var'] = f'[empty {i}]'
+
+    foo = foo.set_index('var')
+    foo['var'] = foo.index
+
+    cons = foo.loc['_cons']
+    foo['coef_cons'] = np.where(foo['var'] != '_cons', foo['coef'] + cons['coef'], foo['coef'])
+    foo['lower_cons'] = np.where(foo['var'] != '_cons', foo['lower'] + cons['coef'], foo['lower'])
+    foo['upper_cons'] = np.where(foo['var'] != '_cons', foo['upper'] + cons['coef'], foo['upper'])
+    foo['sig'] = (foo['lower'] * foo['upper']) > 0
+
+    foo['label'] = foo['var'].apply(lambda x: relabel[x] if x in relabel else x)
+
+    # ok, this should be pretty easy to turn into coef plot
+
+    fig, ax = plt.subplots(figsize=figsize)
+    sns.scatterplot(data=foo, x='coef_cons', y='label', ax=ax, hue='sig', palette={True: sig_color, False: nonsig_color})
+    ax.axvline(x=cons['coef'], color='blue')
+    ax.xaxis.set_major_formatter(lambda x, _: f'{100 * x:.0f}')
+    ax.set(xlabel='Změna souhlasu v procentních bodech', ylabel='')
+
+    for i, (_, row) in enumerate(foo.iterrows()):
+        if np.isfinite(row['coef']):
+            # alpha = 1 if row['sig'] else 0.6
+            if row['var'] == '_cons':
+                plt.text(x=row['coef_cons'] + 0.002, y=i + 0.3, s=f'{100 * row["coef"]:.1f} p.b.', ha='left', va='top',
                          color=sig_color if row['sig'] else nonsig_color)
             else:
                 plt.text(x=row['coef_cons'], y=i - 0.2, s=f'{100 * row["coef"]:+.1f}', ha='center', va='bottom',

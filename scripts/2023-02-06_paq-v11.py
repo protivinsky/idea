@@ -683,6 +683,8 @@ plt.rcParams['font.size'] = 9
 plt.rcParams['xtick.labelsize'] = 10
 plt.rcParams['ytick.labelsize'] = 10
 
+chdir = 'D:\\projects\\idea\\misc\\2023-01-06_zivot-behem-pandemie\\grafy\\'
+
 # region # STATA INIT
 stata.run("""
 clear all
@@ -706,24 +708,53 @@ gen rrnQ469_mean_binary = (rrnQ469_mean > 0.5) if rrnQ469_mean < .
 # Data MV ČR ke konci měsíce, 2022
 
 ua_total = ua[['CELKOVÝ SOUČET', 'datum']]
-ua_total.columns = ['muži', 'ženy', 'celkem', 'datum']
+ua_cols = ['muži', 'ženy', 'celkem']
+ua_total.columns = ua_cols + ['datum']
 ua_total = ua_total.groupby('datum').sum().reset_index()
-ua_total.show()
+
+ua_jan = ua_total.iloc[0]
+for c in ua_cols:
+    ua_total[f'{c}_jan'] = ua_jan[c]
+for c in ua_cols:
+    ua_total[f'{c}_new'] = ua_total[c] - ua_total[f'{c}_jan']
+
 
 months = ['leden', 'únor', 'březen', 'duben', 'květen', 'červen', 'červenec', 'srpen', 'září', 'říjen', 'listopad', 'prosinec']
 
 fig, ax = plt.subplots(figsize=(10, 5))
-cmap = mpl.colors.ListedColormap(['steelblue', 'indianred'])
-ua_total.groupby('datum')[['muži', 'ženy']].sum().plot(kind='bar', stacked=True, cmap=cmap, ax=ax)
+cmap = mpl.colors.ListedColormap(['gray', 'lightgray', 'steelblue', 'indianred'])
+foo = ua_total.groupby('datum')[['muži_jan', 'ženy_jan', 'muži_new', 'ženy_new']].sum()
+foo.plot(kind='bar', stacked=True, ax=ax, cmap=cmap)
 ax.xaxis.set_major_formatter(lambda x, _: months[x])
 ax.yaxis.set_major_formatter(lambda x, _: f'{x // 1000:.0f} {int(x % 1000):03}' if x else '0')
 plt.xticks(rotation=45)
 ax.set(xlabel='', ylabel='')
-for i, row in ua_total.groupby('datum')[['muži', 'ženy']].sum().reset_index().iterrows():
+for i, row in ua_total.groupby('datum').sum().reset_index().iterrows():
     tot = row['muži'] + row['ženy']
-    plt.text(x=i, y=tot + 5000, s=f'{int(tot):,}', alpha=0.8, va='bottom', ha='center')
+    if not i:
+        label = f'{int(tot):,}'
+    else:
+        new_tot = row['muži_new'] + row['ženy_new']
+        label = f'{int(new_tot):+,}'
+    plt.text(x=i, y=tot + 5000, s=label, alpha=0.8, va='bottom', ha='center')
+handles, labels = ax.get_legend_handles_labels()
+title_proxy = mpl.patches.Rectangle((0,0), 0, 0, color='w', alpha=0)
+leg = ax.legend([title_proxy, handles[0], handles[1], title_proxy, handles[2], handles[3]],
+                ['Leden, 2022', 'Muži', 'Ženy', 'Váleční uprchlíci', 'Muži', 'Ženy'],
+                loc='lower center', bbox_to_anchor=(0.5, -0.35), fancybox=True, ncol=6)
+for item, label in zip(leg.legendHandles, leg.texts):
+    if label._text in ['Leden, 2022', 'Váleční uprchlíci']:
+        # width = item.get_window_extent(fig.canvas.get_renderer()).width
+        # label.set_ha('left')
+        # label.set_position((-2*width,0))
+        label.set_weight('bold')
+
 fig.tight_layout()
+fig.savefig(chdir + 'graf1.pdf')
 fig.show()
+
+foo.to_excel(chdir + 'data1.xlsx')
+
 
 # doplnujici data
 ua_total['ratio_muzi'] = ua_total['muži'] / ua_total['celkem']
@@ -734,6 +765,46 @@ ua_total['ratio_muzi'] = ua_total['muži'] / ua_total['celkem']
 
 # endregion
 
+# region # FIGURE 2 - NEW: Počet ukrajinských uprchlíků ve vybraných evropských zemích
+unhcr = pd.read_excel(data_dir + '\\unhcr\\2023-02-11_ukraine.xlsx')
+unhcr['code'] = unhcr['ChatGPT'].apply(lambda x: x.split(': ')[1])
+unhcr['Override'] = unhcr['Override'].fillna('')
+unhcr['country_cz'] = np.where(unhcr['Override'] == '', unhcr['CZ'].apply(lambda x: x.split(': ')[1]), unhcr['Override'])
+
+unhcr.iloc[0]
+
+import world_bank_data as wb
+import pycountry
+
+to_drop = ['Series', 'Year']
+# population
+pop = wb.get_series('SP.POP.TOTL', id_or_value='id', mrv=1).reset_index().drop(columns=to_drop)
+pop.columns = ['code', 'pop']
+
+unhcr = pd.merge(unhcr, pop, how='left')
+unhcr['val'] = unhcr['code'].apply(lambda x: pycountry.countries.get(alpha_3=x).name)
+
+unhcr['refugees'] = unhcr.iloc[:, 1]
+unhcr['ref_per_pop'] = 1000 * unhcr['refugees'] / unhcr['pop']
+unhcr = unhcr.sort_values('ref_per_pop', ascending=False)
+unhcr['country'] = unhcr['ChatGPT'].apply(lambda x: x.split(': ')[0])
+
+foo = unhcr[(unhcr['pop'] > 5e6) & (unhcr['ref_per_pop'] > 5)].reset_index(drop=True)
+fig, ax = plt.subplots()
+sns.barplot(data=foo, x='ref_per_pop', y='country_cz', color='dodgerblue', ax=ax, width=0.7, alpha=0.8)
+ax.set(xlabel='Počet ukrajinských uprchlíků na 1000 obyvatel', ylabel='')
+for i, row in foo.iterrows():
+    plt.text(x=row['ref_per_pop'] + 0.2, y=i, s=f'{row["ref_per_pop"]:.1f}', va='center', ha='left')
+
+fig.tight_layout()
+fig.savefig(chdir + 'graf2_new.pdf')
+fig.show()
+
+foo.to_excel(chdir + 'data2_new.xlsx')
+
+# endregion
+
+
 # region # FIGURE 2: Podíl souhlasících, aby Česká republika v případě potřeby přijala uprchlíky z Ukrajiny
 fig, ax = plt.subplots(figsize=(10, 5))
 for i in range(1, 5):
@@ -743,14 +814,25 @@ for i in range(1, 5):
     sns.lineplot(data=foo, x='vlna_datum', y=c, label=col_labels[c].split('|')[-1].strip(), marker='o')
     for _, row in foo.iterrows():
         plt.text(x=row['vlna_datum'], y=row[c] + 0.5, s=f'{row[c]:.1f} %', ha='center', va='bottom')
-ax.set(xlabel='', ylabel='Podíl souhlasících s přijetím')
+ax.set(xlabel='', ylabel='Podíl souhlasících s přijetím ukrajinských uprchliků')
 ax.yaxis.set_major_formatter(lambda x, _: f'{x:.0f} %')
 # ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.18), fancybox=True, ncol=2)
 ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.27), fancybox=True, ncol=2)
 # fig.suptitle(col_labels[c].split('|')[0].strip())
 fig.tight_layout()
 fig.subplots_adjust(bottom=0.2)
+fig.savefig(chdir + 'graf2.pdf')
 fig.show()
+
+foos = []
+for i in range(1, 5):
+    c = f'rrnQ468_r{i}'
+    foo = OMean.of_groupby(df, 'vlna_datum', c, 'vahy').apply(lambda x: x.mean).rename(col_labels[c].split('|')[1].strip())
+    foos.append(foo)
+
+foo = pd.DataFrame(foos).T
+os.getcwd()
+foo.to_excel('graf2.xlsx')
 # endregion
 
 # region # FIGURE 3: Velikost ukrajinské menšiny v okresech na začátku válku a množství nově příchozích válečných uprchlíků v roce 2022
@@ -792,7 +874,12 @@ relabel = {
 
 out = capture_output(lambda: stata.run(reg_cmd))
 mean = OMean.compute(df['rrnQ468_r3_diff41'], df['vahy']).mean
-coef_plot_for_stata(out, relabel=relabel, title='', figsize=(10, 5)).show()
+f = coef_plot_for_stata_pp(out, relabel=relabel, title='', figsize=(10, 5))
+f.savefig(chdir + 'graf4.pdf')
+f.show()
+
+foo = data_for_stata_output(out, relabel=relabel).fillna('')
+foo.to_excel('graf4.xlsx')
 # endregion
 
 # region # FIGURE 5: Souhlas s přijetím ukrajinských válečných uprchlíků podle charakteristik respondentů
@@ -810,7 +897,15 @@ relabel = {
 
 out = capture_output(lambda: stata.run(reg_cmd))
 mean = OMean.compute(df['rrnQ468_r3'], df['vahy']).mean
-coef_plot_for_stata(out, relabel=relabel, title='', figsize=(10, 5)).show()
+f = coef_plot_for_stata(out, relabel=relabel, title='', figsize=(10, 5), xlabel='Podíl souhlasících s přijímáním')
+f.savefig(chdir + 'graf5.pdf')
+f.show()
+
+foo = data_for_stata_output(out, relabel=relabel).fillna('')
+foo.to_excel(chdir + 'data5.xlsx')
+
+
+
 # endregion
 
 # region # FIGURE 6: Souhlas s přijetím ukrajinských uprchlíků a další názory a očekávání s nimi spojené
@@ -831,7 +926,14 @@ relabel = {
 
 out = capture_output(lambda: stata.run(reg_cmd))
 mean = OMean.compute(df['rrnQ468_r3'], df['vahy']).mean
-coef_plot_for_stata(out, relabel=relabel, title='', figsize=(10, 6)).show()
+f = coef_plot_for_stata(out, relabel=relabel, title='', figsize=(10, 6), xlabel='Podíl souhlasících s přijímáním')
+f.savefig(chdir + 'graf6.pdf')
+f.show()
+
+foo = data_for_stata_output(out, relabel=relabel).fillna('')
+foo.to_excel(chdir + 'data6.xlsx')
+
+
 # endregion
 
 # region # FIGURE 7: Vývoj souhlasu s přijetím uprchlíků v čase a osobní známost s Ukrajinci zde žijícími
@@ -850,14 +952,19 @@ foo = foo.groupby(['vlna_datum', c_col]).apply(lambda x: OMean.compute(x[y_col],
 foo[y_col] = 100 * foo[y_col]
 fig, ax = plt.subplots(figsize=(10, 4))
 sns.lineplot(data=foo, x='vlna_datum', y=y_col, hue=c_col, marker='o', palette=hues, hue_order=hue_order, ax=ax)
-ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.25), fancybox=True, ncol=3)
-ax.set(xlabel='', ylabel='Podíl souhlasících s přijetím')
+handles, labels = ax.get_legend_handles_labels()
+ax.legend(handles, ['Zná osobně (přítel, příbuzný, kolega)', 'Zná jen povrchně (např. paní na úklid, soused)', 'Nezná'], loc='lower center', bbox_to_anchor=(0.5, -0.31), fancybox=True, ncol=3)
+ax.set(xlabel='Datum šetření', ylabel='Podíl souhlasících s přijímáním')
 ax.yaxis.set_major_formatter(lambda x, _: f'{x:.0f} %')
 ax.set(ylim=(25, 58))
 for _, row in foo.iterrows():
     plt.text(x=row['vlna_datum'], y=row[y_col] + 0.5, s=f'{row[y_col]:.1f} %', ha='center', va='bottom', alpha=0.9)
 fig.tight_layout()
-fig.subplots_adjust(bottom=0.2)
+fig.subplots_adjust(bottom=0.22)
+
+foo.pivot(index='vlna_datum', columns='rnQ471_r1', values='rrnQ468_r3').to_excel(chdir + 'data7.xlsx')
+
+fig.savefig(chdir + 'graf7.pdf')
 fig.show()
 # endregion
 
@@ -899,13 +1006,16 @@ for i, c in enumerate(foo.columns):
     plt.text(x=x_red, y=i, s=f'{x_red:.1f} %', va='center', ha='center', color=red)
     plt.text(x=100 - x_green, y=i, s=f'{x_green:.1f} %', va='center', ha='center', color=green)
 
-ax.set(xlabel='')
+ax.set(xlabel='Podíl respondentů')
 ax.xaxis.set_major_formatter(lambda x, _: f'{x:.0f} %')
-handles, labels = fig.axes[0].get_legend_handles_labels()
-fig.axes[0].legend([handles[0], handles[10]], ['0 = Negativní pól', '10 = Pozitivní pól'], loc='lower center', bbox_to_anchor=(0.5, -0.2), fancybox=True, ncol=2)
-fig.subplots_adjust(bottom=0.15)
+handles, labels = ax.get_legend_handles_labels()
+ax.legend([handles[0], handles[10]], ['0 = Negativní pól', '10 = Pozitivní pól'], loc='lower center', bbox_to_anchor=(0.5, -0.25), fancybox=True, ncol=2)
+fig.subplots_adjust(bottom=0.2)
 fig.tight_layout()
+fig.savefig(chdir + 'graf8.pdf')
 fig.show()
+
+foo.T.sort_index().to_excel(chdir + 'data8.xlsx')
 # endregion
 
 # region # FIGURE 9: Vývoj obtíží, které zažívají české domácnosti v důsledku vysokých cen energií
@@ -944,12 +1054,17 @@ if c_annotate:
             if j in j_range:
                 plt.text(x=(x_cum + 0.6) if cumulative else x_half, y=i, s=f'{(x_cum if cumulative else x):.1f} %',
                          va='center', ha='left' if cumulative else 'center', color='black')
-ax.set(xlabel='', ylabel='')
+ax.set(xlabel='Podíl domácností', ylabel='')
 ax.xaxis.set_major_formatter(lambda x, _: f'{x:.0f} %')
-ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.33), fancybox=True, ncol=3)
+handles, labels = ax.get_legend_handles_labels()
+ax.legend(handles, ['Větší obtíže', 'Menší obtíže', 'Bez obtíží'], loc='lower center', bbox_to_anchor=(0.5, -0.43), fancybox=True, ncol=3)
 fig.tight_layout()
-fig.subplots_adjust(bottom=0.25)
+fig.subplots_adjust(bottom=0.29)
+
+fig.savefig(chdir + 'graf9.pdf')
 fig.show()
+
+foo.T.to_excel(chdir + 'data9.xlsx')
 # endregion
 
 # region # FIGURE 10: Souhlas s přijetím uprchlíků podle obtíží kvůli vysokým cenám energií, vývoj v čase
@@ -957,21 +1072,28 @@ hues = ['#1a9850', '#f46d43', '#a50026']
 y_col = 'rrnQ468_r3'
 c_col = 'rrnQ519_r1'
 foo = df[[c_col, 'vlna_datum', 'vahy', y_col]].copy().dropna(subset=[y_col, c_col])
+# DEBUG
+respIds = df[np.isfinite(df['rrnQ468_r3_diff41'])]['respondentId'].unique()
+foo = df[df['respondentId'].isin(respIds)][[c_col, 'vlna_datum', 'vahy', y_col]].copy().dropna(subset=[y_col, c_col])
 foo[c_col] = foo[c_col].map({float(k): v for k, v in col_value_labels[c_col].items()})
 foo = foo.groupby(['vlna_datum', c_col]).apply(lambda x: OMean.compute(x[y_col], x['vahy']).mean).rename(y_col) \
     .reset_index()
 foo[y_col] = 100 * foo[y_col]
 fig, ax = plt.subplots(figsize=(10, 4))
 sns.lineplot(data=foo, x='vlna_datum', y=y_col, hue=c_col, marker='o', palette=hues, ax=ax)
-ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.25), fancybox=True, ncol=3)
-ax.set(xlabel='', ylabel='Podíl souhlasících s přijetím')
+handles, labels = ax.get_legend_handles_labels()
+ax.legend(handles, ['Bez obtíží', 'Menší obtíže', 'Větší obtíže'], loc='lower center', bbox_to_anchor=(0.5, -0.32), fancybox=True, ncol=3)
+ax.set(xlabel='Datum šetření', ylabel='Podíl souhlasících s přijímáním')
 ax.yaxis.set_major_formatter(lambda x, _: f'{x:.0f} %')
 ax.set(ylim=(22, 63))
 for _, row in foo.iterrows():
     plt.text(x=row['vlna_datum'], y=row[y_col] + 0.5, s=f'{row[y_col]:.1f} %', ha='center', va='bottom', alpha=0.9)
 fig.tight_layout()
-fig.subplots_adjust(bottom=0.2)
+fig.subplots_adjust(bottom=0.25)
+fig.savefig(chdir + 'graf10.pdf')
 fig.show()
+
+foo.pivot_table(index='vlna_datum', columns='rrnQ519_r1', values='rrnQ468_r3').to_excel(chdir + 'data10.xlsx')
 # endregion
 
 # region # FIGURE 11: Souhlas s přijetím uprchlíků a vnímání nevyprovokované ruské agrese jako hlavní příčiny války
@@ -984,15 +1106,18 @@ foo = foo.groupby(['vlna_datum', c_col]).apply(lambda x: OMean.compute(x[y_col],
 foo[y_col] = 100 * foo[y_col]
 fig, ax = plt.subplots(figsize=(10, 4))
 sns.lineplot(data=foo, x='vlna_datum', y=y_col, hue=c_col, marker='o', ax=ax)
-ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.25), fancybox=True, ncol=2)
-ax.set(xlabel='', ylabel='Podíl souhlasících s přijetím')
+ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.32), fancybox=True, ncol=2)
+ax.set(xlabel='Datum šetření', ylabel='Podíl souhlasících s přijímáním')
 ax.yaxis.set_major_formatter(lambda x, _: f'{x:.0f} %')
 ax.set(ylim=(16, 79))
 for _, row in foo.iterrows():
     plt.text(x=row['vlna_datum'], y=row[y_col] + 0.5, s=f'{row[y_col]:.1f} %', ha='center', va='bottom', alpha=0.9)
 fig.tight_layout()
-fig.subplots_adjust(bottom=0.2)
+fig.subplots_adjust(bottom=0.24)
+fig.savefig(chdir + 'graf11.pdf')
 fig.show()
+
+foo.pivot_table(index='vlna_datum', columns='rrnQ466_2_1', values='rrnQ468_r3').to_excel(chdir + 'data11.xlsx')
 # endregion
 
 # region # FIGURE 12: Graf 12: Souhlas respondentů s tvrzením „Válka na Ukrajině je důsledkem nevyprovokované agrese ze strany Ruska proti suverénnímu státu?“
@@ -1008,12 +1133,28 @@ cmap = mpl.colors.ListedColormap(colors[1:-1])
 fig = categorical_over_groups(df, hacked_col_labels, hacked_value_labels, c_col, 'vlna_datum', g_map=g_map,
                                   c_annotate=[0, 5, 10], cumulative=False, cmap=cmap)
 handles, labels = fig.axes[0].get_legend_handles_labels()
-fig.axes[0].legend([handles[0], handles[10]], ['Rozhodně souhlasím', 'Rozhodně nesouhlasím'], loc='lower center', bbox_to_anchor=(0.5, -0.30), fancybox=True, ncol=2)
+fig.axes[0].set(xlabel='Podíl respondentů')
+fig.axes[0].legend([handles[0], handles[10]], ['Rozhodně souhlasím', 'Rozhodně nesouhlasím'], loc='lower center', bbox_to_anchor=(0.5, -0.41), fancybox=True, ncol=2)
 # fig.axes[0].legend(handles, ['Rozhodně souhlasím'] + [''] * 9 + ['Rozhodně nesouhlasím'], loc='upper center', bbox_to_anchor=(0.5, 1.2), fancybox=True, ncol=11)
 fig.suptitle('')
 fig.tight_layout()
-fig.subplots_adjust(bottom=0.2)
+fig.subplots_adjust(bottom=0.26)
+fig.savefig(chdir + 'graf12.pdf')
 fig.show()
+
+g_col = 'vlna_datum'
+c_label_map = {float(k): v for k, v in hacked_value_labels[c_col].items()}
+c_labels = list(map(lambda x: x[1], sorted([(k, v) for k, v in c_label_map.items()], key=lambda x: x[0])))
+w_col = 'vahy'
+foo = df.groupby([c_col, g_col])[w_col].sum().unstack()
+foo.index = pd.Categorical(foo.index.map(c_label_map), categories=c_labels, ordered=True)
+foo = foo / foo.sum()
+foo = foo[foo.columns[::-1]]
+if g_map is not None:
+    foo.columns = foo.columns.map({c: g_map(c) for c in foo.columns})
+
+foo[foo.columns[::-1]].to_excel(chdir + 'data12.xlsx')
+
 # endregion
 
 # region # FIGURE 13: Názor české veřejnosti na integraci osob z Ukrajiny do české společnosti
@@ -1024,11 +1165,15 @@ foo[c] = 100 * foo[c]
 sns.lineplot(data=foo, x='vlna_datum', y=c, marker='o')
 for _, row in foo.iterrows():
     plt.text(x=row['vlna_datum'], y=row[c] + 0.5, s=f'{row[c]:.1f} %', ha='center', va='bottom')
-ax.set(xlabel='', ylabel='')
+ax.set(xlabel='Datum šetření', ylabel='Podíl souhlasících s dobrou integrací')
 ax.yaxis.set_major_formatter(lambda x, _: f'{x:.0f} %')
 ax.set(ylim=(36, 52))
 fig.tight_layout()
+fig.savefig(chdir + 'graf13.pdf')
 fig.show()
+
+foo = OMean.of_groupby(df, 'vlna_datum', c, 'vahy').apply(lambda x: x.mean).rename(col_labels[c]).reset_index()
+foo.to_excel(chdir + 'data13.xlsx')
 # endregion
 
 # region # FIGURE 14: Vnímání integrace Ukrajinců do české společnosti a charakteristiky respondentů
@@ -1046,7 +1191,12 @@ relabel = {
 
 out = capture_output(lambda: stata.run(reg_cmd))
 mean = OMean.compute(df['rrnQ468_r3'], df['vahy']).mean
-coef_plot_for_stata(out, relabel=relabel, title='', figsize=(10, 5)).show()
+f = coef_plot_for_stata(out, relabel=relabel, title='', figsize=(10, 5), xlabel='Podíl souhlasících s dobrou integrací')
+f.savefig(chdir + 'graf14.pdf')
+f.show()
+
+foo = data_for_stata_output(out, relabel=relabel).fillna('')
+foo.to_excel(chdir + 'data14.xlsx')
 # endregion
 
 # region # FIGURE 15: Vývoj vnímané integrace Ukrajinců do české společnosti ve vztahu k přímému negativnímu dopadu migrační vlny na respondenta
@@ -1065,15 +1215,19 @@ foo = foo.groupby(['vlna_datum', c_col]).apply(lambda x: OMean.compute(x[y_col],
 foo[y_col] = 100 * foo[y_col]
 fig, ax = plt.subplots(figsize=(10, 4))
 sns.lineplot(data=foo, x='vlna_datum', y=y_col, hue=c_col, marker='o', ax=ax)
-ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.25), fancybox=True, ncol=4)
-ax.set(xlabel='', ylabel='')
+handles, labels = ax.get_legend_handles_labels()
+ax.legend(handles[::-1], ['Negativní dopad', 'Pozitivní nebo žádný dopad'], loc='lower center', bbox_to_anchor=(0.5, -0.33), fancybox=True, ncol=4)
+ax.set(xlabel='Datum šetření', ylabel='Podíl souhlasících s dobrou integrací')
 ax.yaxis.set_major_formatter(lambda x, _: f'{x:.0f} %')
 ax.set(ylim=(22, 54))
 for _, row in foo.iterrows():
     plt.text(x=row['vlna_datum'], y=row[y_col] + 0.5, s=f'{row[y_col]:.1f} %', ha='center', va='bottom', alpha=0.9)
 fig.tight_layout()
-fig.subplots_adjust(bottom=0.2)
+fig.subplots_adjust(bottom=0.26)
+fig.savefig(chdir + 'graf15.pdf')
 fig.show()
+
+foo.pivot_table(index='vlna_datum', columns='rrrnQ581_negative', values='rrnQ469_mean').to_excel(chdir + 'data15.xlsx')
 # endregion
 
 # region # FIGURE 16: Vývoj vnímané integrace Ukrajinců do české společnosti podle vnímané příčiny války
@@ -1086,15 +1240,19 @@ foo = foo.groupby(['vlna_datum', c_col]).apply(lambda x: OMean.compute(x[y_col],
 foo[y_col] = 100 * foo[y_col]
 fig, ax = plt.subplots(figsize=(10, 4))
 sns.lineplot(data=foo, x='vlna_datum', y=y_col, hue=c_col, marker='o', ax=ax)
-ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.25), fancybox=True, ncol=2)
-ax.set(xlabel='', ylabel='')
+handles, labels = ax.get_legend_handles_labels()
+ax.legend(handles, ['Silný souhlas', 'Slabý souhlas až nesouhlas'], loc='lower center', bbox_to_anchor=(0.5, -0.33), fancybox=True, ncol=2)
+ax.set(xlabel='Datum šetření', ylabel='Podíl souhlasících s dobrou integrací')
 ax.yaxis.set_major_formatter(lambda x, _: f'{x:.0f} %')
 ax.set(ylim=(22, 68))
 for _, row in foo.iterrows():
     plt.text(x=row['vlna_datum'], y=row[y_col] + 0.5, s=f'{row[y_col]:.1f} %', ha='center', va='bottom', alpha=0.9)
 fig.tight_layout()
-fig.subplots_adjust(bottom=0.2)
+fig.subplots_adjust(bottom=0.26)
+fig.savefig(chdir + 'graf16.pdf')
 fig.show()
+
+foo.pivot_table(index='vlna_datum', columns='rrnQ466_2_1', values='rrnQ469_mean').to_excel(chdir + 'data16.xlsx')
 # endregion
 
 # region # FIGURE 17: Vývoj pohledu na integraci ukrajinských dětí do českých škol
@@ -1134,13 +1292,15 @@ if c_annotate:
             if j in j_range:
                 plt.text(x=(x_cum + 0.6) if cumulative else x_half, y=i, s=f'{(x_cum if cumulative else x):.1f} %',
                          va='center', ha='left' if cumulative else 'center', color='black')
-ax.set(xlabel='', ylabel='')
+ax.set(xlabel='Podíl respondentů', ylabel='')
 ax.xaxis.set_major_formatter(mpl.ticker.PercentFormatter())
-ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.29), fancybox=True, ncol=5)
+ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.39), fancybox=True, ncol=5)
 fig.tight_layout()
-fig.subplots_adjust(bottom=0.2)
-
+fig.subplots_adjust(bottom=0.26)
+fig.savefig(chdir + 'graf17.pdf')
 fig.show()
+
+foo[foo.columns[::-1]].to_excel(chdir + 'data17.xlsx')
 # endregion
 
 # region # FIGURE 18: Vývoj souhlasu s přijímáním uprchlíků a sledované zpravodajské zdroje
@@ -1149,30 +1309,33 @@ hues = 'Set1'
 y_col = 'rrnQ468_r3'
 c_col = 'clu'
 col_value_labels['clu'] = {
-    '1.0': 'Skupina E',
-    '2.0': 'Skupina B',
-    '4.0': 'Skupina A',
-    '3.0': 'Skupina C',
-    '5.0': 'Skupina D',
+    '1.0': 'Ignorující',
+    '2.0': 'Tradiční',
+    '4.0': 'Všestranní',
+    '3.0': 'Internetoví',
+    '5.0': 'Příležitostní',
 }
+hue_order = ['Všestranní', 'Tradiční', 'Internetoví', 'Příležitostní', 'Ignorující']
 foo = df[[c_col, 'vlna_datum', 'vahy', y_col]].copy().dropna(subset=[y_col, c_col])
 foo[c_col] = foo[c_col].map({float(k): v for k, v in col_value_labels[c_col].items()})
 foo = foo.groupby(['vlna_datum', c_col]).apply(lambda x: OMean.compute(x[y_col], x['vahy']).mean).rename(y_col) \
     .reset_index()
 foo[y_col] = 100 * foo[y_col]
 fig, ax = plt.subplots(figsize=(10, 4))
-sns.lineplot(data=foo, x='vlna_datum', y=y_col, hue=c_col, hue_order=[f'Skupina {x}' for x in 'ABCDE'], marker='o',
+sns.lineplot(data=foo, x='vlna_datum', y=y_col, hue=c_col, hue_order=hue_order, marker='o',
              palette=hues, ax=ax)
-ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.25), fancybox=True, ncol=5)
-ax.set(xlabel='', ylabel='Podíl souhlasících s přijetím')
+ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.32), fancybox=True, ncol=5)
+ax.set(xlabel='Datum šetření', ylabel='Podíl souhlasících s přijímáním')
 ax.yaxis.set_major_formatter(lambda x, _: f'{x:.0f} %')
 ax.set(ylim=(18, 72))
 for _, row in foo.iterrows():
     plt.text(x=row['vlna_datum'], y=row[y_col] + 0.5, s=f'{row[y_col]:.1f} %', ha='center', va='bottom', alpha=0.9)
 fig.tight_layout()
-fig.subplots_adjust(bottom=0.2)
+fig.subplots_adjust(bottom=0.26)
+fig.savefig(chdir + 'graf18.pdf')
 fig.show()
 
+foo.pivot_table(index='vlna_datum', columns='clu', values='rrnQ468_r3')[hue_order].to_excel(chdir + 'data18.xlsx')
 # endregion
 
 # region # FIGURE 19: Model souhlasu s přijetím válečných uprchlíků se zahrnutím mediálního chování
@@ -1185,12 +1348,23 @@ relabel = {
     'rrnQ519_r1': 'Potíže s cenami energií [base = Bez obtíží]',
     'rnQ471_r1': 'Zná Ukrajince v Česku [base = Nezná)',
     'ua_pred_valkou_rel_pct': 'Podíl Ukrajinců v regionu před válkou',
-    'rclu': 'Sledování zpravodajských zdrojů [base = Skupina E]',
+    'rclu': 'Sledování zpravodajských zdrojů [base = Ignorující]',
+    'Skupina A': 'Všestranní',
+    'Skupina B': 'Tradiční',
+    'Skupina C': 'Internetoví',
+    'Skupina D': 'Příležitostní'
 }
 
 out = capture_output(lambda: stata.run(reg_cmd))
 mean = OMean.compute(df['rrnQ468_r3'], df['vahy']).mean
-coef_plot_for_stata(out, relabel=relabel, title='', figsize=(10, 6)).show()
+fig = coef_plot_for_stata(out, relabel=relabel, title='', figsize=(10, 6))
+fig.axes[0].set(xlabel='Podíl rozhodně považujících ruskou agresi za hlavní příčinu války')
+fig.tight_layout()
+fig.savefig(chdir + 'graf19.pdf')
+fig.show()
+
+foo = data_for_stata_output(out, relabel=relabel).fillna('')
+foo.to_excel(chdir + 'data19.xlsx')
 # endregion
 
 # region # FIGURE 20: Model souhlasu s přijetím válečných uprchlíků se zahrnutím mediálního chování
@@ -1204,82 +1378,238 @@ relabel = {
     'rnQ471_r1': 'Zná Ukrajince v Česku [base = Nezná)',
     'rrnQ466_2_1': 'Rozhodně považuje ruskou agresi za příčinu války',
     'ua_pred_valkou_rel_pct': 'Podíl Ukrajinců v regionu před válkou',
-    'rclu': 'Sledování zpravodajských zdrojů [base = Skupina E]',
+    'rclu': 'Sledování zpravodajských zdrojů [base = Ignorující]',
+    'Skupina A': 'Všestranní',
+    'Skupina B': 'Tradiční',
+    'Skupina C': 'Internetoví',
+    'Skupina D': 'Příležitostní'
 }
 
 out = capture_output(lambda: stata.run(reg_cmd))
 mean = OMean.compute(df['rrnQ468_r3'], df['vahy']).mean
-coef_plot_for_stata(out, relabel=relabel, title='', figsize=(10, 6.6)).show()
+fig = coef_plot_for_stata(out, relabel=relabel, title='', figsize=(10, 6.6))
+fig.axes[0].set(xlabel='Podíl souhlasících s přijímáním')
+fig.tight_layout()
+fig.savefig(chdir + 'graf20.pdf')
+fig.show()
+
+foo = data_for_stata_output(out, relabel=relabel).fillna('')
+foo.to_excel(chdir + 'data20.xlsx')
 # endregion
 
 # endregion
 
 
 
+df[['nQ491_r1', 'vlna']].value_counts()
+
+2 ** (7/12)
+2 ** (4/12)
+2 ** (5/12)
+
+for i in range(12):
+    print(f'2 ** ({i} / 12) = {2 ** (i/12)}')
+
+
+OMean.of_groupby(df, 'rrnQ519_r1', 'rrnQ468_r3_diff41', 'vahy')
+OMean.of_groupby(df, 'rrnQ519_r1', 'rrnQ468_r3_diff41')
+
+
+df['ones'] = 1.
+
+# region # FIGURE 17: Vývoj pohledu na integraci ukrajinských dětí do českých škol
+g_map = lambda c: datetime.strftime(c, '%d. %m. %Y').replace(' 0', ' ')
+colors = sns.color_palette('RdYlGn', n_colors=7)
+cmap = mpl.colors.ListedColormap(colors[1:-1])
+
+c_col = 'rnQ469_r3'
+g_col = 'vlna_datum'
+c_annotate = True
+cumulative = False
+
+c_label_map = {float(k): v for k, v in col_value_labels[c_col].items()}
+c_labels = list(map(lambda x: x[1], sorted([(k, v) for k, v in c_label_map.items()], key=lambda x: x[0])))
+w_col = 'vahy'
+foo = df.groupby([c_col, g_col])[w_col].sum().unstack()
+foo.index = pd.Categorical(foo.index.map(c_label_map), categories=c_labels, ordered=True)
+foo = 100 * foo / foo.sum()
+foo = foo[foo.columns[::-1]]
+if g_map is not None:
+    foo.columns = foo.columns.map({c: g_map(c) for c in foo.columns})
+
+fig, ax = plt.subplots(figsize=(10, 3.4))
+foo.T.plot(kind='barh', stacked=True, colormap=cmap, width=0.7, ax=ax)
+if c_annotate:
+    for i, c in enumerate(foo.columns):
+        col = foo[c]
+        x_cum = 0
+        x_half = 0
+        half_prev = 0
+        j_range = c_annotate if isinstance(c_annotate, Iterable) else list(range(len(col)))
+        for j in range(len(col)):
+            x = col[c_labels[j]]
+            x_cum += x
+            x_half += x / 2 + half_prev
+            half_prev = x / 2
+            if j in j_range:
+                plt.text(x=(x_cum + 0.6) if cumulative else x_half, y=i, s=f'{(x_cum if cumulative else x):.1f} %',
+                         va='center', ha='left' if cumulative else 'center', color='black')
+ax.set(xlabel='Podíl respondentů', ylabel='')
+ax.xaxis.set_major_formatter(mpl.ticker.PercentFormatter())
+ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.39), fancybox=True, ncol=5)
+fig.tight_layout()
+fig.subplots_adjust(bottom=0.26)
+# fig.savefig(chdir + 'graf17.pdf')
+fig.show()
+
+# foo[foo.columns[::-1]].to_excel(chdir + 'data17.xlsx')
+# endregion
+
+
+# region # FIGURE 17: Vývoj pohledu na integraci ukrajinských dětí do českých škol
+g_map = lambda c: datetime.strftime(c, '%d. %m. %Y').replace(' 0', ' ')
+colors = sns.color_palette('RdYlGn', n_colors=7)
+cmap = mpl.colors.ListedColormap(colors[1:-1])
+
+c_col = 'rnQ469_r3'
+g_col = 'vlna_datum'
+c_annotate = True
+cumulative = False
+
+c_label_map = {float(k): v for k, v in col_value_labels[c_col].items()}
+c_labels = list(map(lambda x: x[1], sorted([(k, v) for k, v in c_label_map.items()], key=lambda x: x[0])))
+w_col = 'ones'
+foo = df.groupby([c_col, g_col])[w_col].sum().unstack()
+foo.index = pd.Categorical(foo.index.map(c_label_map), categories=c_labels, ordered=True)
+foo = 100 * foo / foo.sum()
+foo = foo[foo.columns[::-1]]
+if g_map is not None:
+    foo.columns = foo.columns.map({c: g_map(c) for c in foo.columns})
+
+fig, ax = plt.subplots(figsize=(10, 3.4))
+foo.T.plot(kind='barh', stacked=True, colormap=cmap, width=0.7, ax=ax)
+if c_annotate:
+    for i, c in enumerate(foo.columns):
+        col = foo[c]
+        x_cum = 0
+        x_half = 0
+        half_prev = 0
+        j_range = c_annotate if isinstance(c_annotate, Iterable) else list(range(len(col)))
+        for j in range(len(col)):
+            x = col[c_labels[j]]
+            x_cum += x
+            x_half += x / 2 + half_prev
+            half_prev = x / 2
+            if j in j_range:
+                plt.text(x=(x_cum + 0.6) if cumulative else x_half, y=i, s=f'{(x_cum if cumulative else x):.1f} %',
+                         va='center', ha='left' if cumulative else 'center', color='black')
+ax.set(xlabel='Podíl respondentů', ylabel='')
+ax.xaxis.set_major_formatter(mpl.ticker.PercentFormatter())
+ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.39), fancybox=True, ncol=5)
+fig.tight_layout()
+fig.subplots_adjust(bottom=0.26)
+fig.savefig(chdir + 'graf17.pdf')
+fig.show()
+
+foo[foo.columns[::-1]].to_excel(chdir + 'data17.xlsx')
+# endregion
+
+# region # FIGURE 17: Vývoj pohledu na integraci ukrajinských dětí do českých škol
+g_map = lambda c: datetime.strftime(c, '%d. %m. %Y').replace(' 0', ' ')
+colors = sns.color_palette('RdYlGn', n_colors=7)
+cmap = mpl.colors.ListedColormap(colors[1:-1])
+
+c_col = 'rnQ469_r1'
+g_col = 'vlna_datum'
+c_annotate = True
+cumulative = False
+
+c_label_map = {float(k): v for k, v in col_value_labels[c_col].items()}
+c_labels = list(map(lambda x: x[1], sorted([(k, v) for k, v in c_label_map.items()], key=lambda x: x[0])))
+w_col = 'ones'
+foo = df.groupby([c_col, g_col])[w_col].sum().unstack()
+foo.index = pd.Categorical(foo.index.map(c_label_map), categories=c_labels, ordered=True)
+foo = 100 * foo / foo.sum()
+foo = foo[foo.columns[::-1]]
+if g_map is not None:
+    foo.columns = foo.columns.map({c: g_map(c) for c in foo.columns})
+
+fig, ax = plt.subplots(figsize=(10, 3.4))
+foo.T.plot(kind='barh', stacked=True, colormap=cmap, width=0.7, ax=ax)
+if c_annotate:
+    for i, c in enumerate(foo.columns):
+        col = foo[c]
+        x_cum = 0
+        x_half = 0
+        half_prev = 0
+        j_range = c_annotate if isinstance(c_annotate, Iterable) else list(range(len(col)))
+        for j in range(len(col)):
+            x = col[c_labels[j]]
+            x_cum += x
+            x_half += x / 2 + half_prev
+            half_prev = x / 2
+            if j in j_range:
+                plt.text(x=(x_cum + 0.6) if cumulative else x_half, y=i, s=f'{(x_cum if cumulative else x):.1f} %',
+                         va='center', ha='left' if cumulative else 'center', color='black')
+ax.set(xlabel='Podíl respondentů', ylabel='')
+ax.xaxis.set_major_formatter(mpl.ticker.PercentFormatter())
+ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.39), fancybox=True, ncol=5)
+fig.tight_layout()
+fig.subplots_adjust(bottom=0.26)
+# fig.savefig(chdir + 'graf17.pdf')
+fig.show()
+
+foo[foo.columns[::-1]].to_excel(chdir + 'data17.xlsx')
+# endregion
+
+# region # FIGURE 17: Vývoj pohledu na integraci ukrajinských dětí do českých škol
+g_map = lambda c: datetime.strftime(c, '%d. %m. %Y').replace(' 0', ' ')
+colors = sns.color_palette('RdYlGn', n_colors=7)
+cmap = mpl.colors.ListedColormap(colors[1:-1])
+
+c_col = 'rnQ468_r3'
+g_col = 'vlna_datum'
+c_annotate = True
+cumulative = False
+
+c_label_map = {float(k): v for k, v in col_value_labels[c_col].items()}
+c_labels = list(map(lambda x: x[1], sorted([(k, v) for k, v in c_label_map.items()], key=lambda x: x[0])))
+w_col = 'ones'
+foo = df.groupby([c_col, g_col])[w_col].sum().unstack()
+foo.index = pd.Categorical(foo.index.map(c_label_map), categories=c_labels, ordered=True)
+foo = 100 * foo / foo.sum()
+foo = foo[foo.columns[::-1]]
+if g_map is not None:
+    foo.columns = foo.columns.map({c: g_map(c) for c in foo.columns})
+
+fig, ax = plt.subplots(figsize=(10, 3.4))
+foo.T.plot(kind='barh', stacked=True, colormap=cmap, width=0.7, ax=ax)
+if c_annotate:
+    for i, c in enumerate(foo.columns):
+        col = foo[c]
+        x_cum = 0
+        x_half = 0
+        half_prev = 0
+        j_range = c_annotate if isinstance(c_annotate, Iterable) else list(range(len(col)))
+        for j in range(len(col)):
+            x = col[c_labels[j]]
+            x_cum += x
+            x_half += x / 2 + half_prev
+            half_prev = x / 2
+            if j in j_range:
+                plt.text(x=(x_cum + 0.6) if cumulative else x_half, y=i, s=f'{(x_cum if cumulative else x):.1f} %',
+                         va='center', ha='left' if cumulative else 'center', color='black')
+ax.set(xlabel='Podíl respondentů', ylabel='')
+ax.xaxis.set_major_formatter(mpl.ticker.PercentFormatter())
+ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.39), fancybox=True, ncol=5)
+fig.tight_layout()
+fig.subplots_adjust(bottom=0.26)
+# fig.savefig(chdir + 'graf17.pdf')
+fig.show()
+
+foo[foo.columns[::-1]].to_excel(chdir + 'data17.xlsx')
+# endregion
 
 
 
-stata.run("""
-clear all
-version 17
-set more off
-// global path to data
-global PATHD="D:/projects/idea/data"
-
-use ${PATHD}/PAQ/zivot-behem-pandemie/processed/data.dta, clear
-
-recode rnQ52_1_1 (1 2 = 1) (3 = 2) (4 5 = 3), gen(rrnQ52_1_1)
-recode rrnQ519_r1 (1 = 1) (2 3 = 0), gen(rrrnQ519_r1)
-""")
-
-
-reg = 'reg rrnQ468_mean i.sex ib2.edu3 i.rrvlna rrrnQ519_r1 ib3.rnQ471_r1 rrnQ466_2_1 rnQ515_sel_binary_ext rnQ516_binary_ext ib5.rclu [pw=vahy], vce(cluster respondentId)'
-
-replace_label = {
-    '_cons': '[Intercept]',
-    'sex': 'Pohlaví [base = Muž]',
-    'edu3': 'Dosažené vzdělání [base = S maturitou]',
-    'rrvlna': 'Vlna šetření',
-    'rrrnQ519_r1': 'Větší finanční potíže s cenami energií',
-    'rnQ471_r1': 'Zná Ukrajince v Česku [base = Nezná)',
-    'rrnQ466_2_1': 'Rozhodně považuje ruskou agresi za příčinu války',
-    'rnQ515_sel_binary_ext': 'Očekává negativní dopady s příchodem Ukrajinců',
-    'rnQ516_binary_ext': 'Očekává pozitivní dopady s příchodem Ukrajinců',
-    'rclu': 'Zpravodajské zdroje [base = Skupina E]',
-}
-
-out = capture_output(lambda: stata.run(reg))
-mean = OMean.compute(df['rrnQ468_mean'], df['vahy']).mean
-title = f'Pravděpodobnost souhlasu s přijetím Ukrajinských válečných uprchlíků (průměr šetření {100 * mean:.1f} %)'
-
-coef_plot_for_stata(out, relabel=replace_label, title=title).show()
-
-
-
-
-df['nQ37_0_0'].value_counts()
-df[['nQ37_0_0', 'vlna']].value_counts()
-df.groupby('respondentId')['nQ37_0_0'].sum().sort_values(ascending=False)
-
-df['nQ251_0_0'].value_counts()
-df[['nQ251_0_0', 'vlna']].value_counts()
-df.groupby('respondentId')['nQ251_0_0'].sum().sort_values(ascending=False)
-
-df['nQ469_r8'].value_counts()
-
-
-foo = df.groupby('respondentId')[['nQ37_0_0', 'nQ251_0_0']].sum()
-to_drop = foo.index[foo.sum(axis=1) > 1]
-
-foo = df[~df['respondentId'].isin(to_drop)]
-foo['nQ37_0_0'].value_counts()
-foo['nQ251_0_0'].value_counts()
-
-reg_cmd = 'reg rrnQ468_r3_diff41 rtypdom_student rrnQ466_2_1 ua_zvyseni_rel_pct [pw=vahy], vce(cluster respondentId)'
-relabel = {
-    '_cons': '[Intercept]',
-    'rtypdom_student': 'Studentská domácnost',
-    'rrnQ466_2_1': 'Rozhodně považuje ruskou agresi za příčinu války',
-    'ua_zvyseni_rel_pct': 'Vyšší počet příchozích uprchlíků (o 1 p.b.)',
-}
 

@@ -20,7 +20,7 @@
 # - přejmenuj sloupce v datasetu, aby to mělo logičtější strukturu
 # - připrav variable_labels a value_labels pro export do staty
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ## Importy
 
 # %%
@@ -295,22 +295,11 @@ def loader(year=21):
 # %%
 for year in [17, 21]:
     print(f'loading 20{year}')
-
-    # load and process data
     df, variable_labels, value_labels = loader(year=year)
-
-    # save data for stata
     df.to_stata(f'{data_root}/uchazec/uch{year}.dta', write_index=False, version=118, variable_labels=variable_labels, value_labels=value_labels)
-    
-    # apply value labels and save for python
-    for c in df.columns:
-        if c in value_labels.keys():
-            df[c] = df[c].map(value_labels[c]).astype('category')
-    df.to_parquet(f'temp/uchazec/uch{year}.parquet')
 
-df17 = pd.read_parquet('temp/uchazec/uch17.parquet')
-df21 = pd.read_parquet('temp/uchazec/uch21.parquet')
-df = df21
+# %%
+df, variable_labels, value_labels = loader()
 
 # %%
 df.shape
@@ -319,9 +308,29 @@ df.shape
 variable_labels
 
 # %%
+for c in df.columns:
+    if c in value_labels.keys():
+        df[c] = df[c].map(value_labels[c]).astype('category')
+
+# %%
+df.to_parquet('temp/uchazec/uch21.parquet')
+
+# %%
 df.head()
 
 # %%
+
+# %%
+for year in [17, 21]:
+    df, variable_labels, value_labels = loader(year=year)
+    for c in df.columns:
+        if c in value_labels.keys():
+            df[c] = df[c].map(value_labels[c]).astype('category')
+    df.to_parquet(f'temp/uchazec/uch{year}.parquet')
+
+df17 = pd.read_parquet('../temp/uchazec/uch17.parquet')
+df21 = pd.read_parquet('../temp/uchazec/uch21.parquet')
+df = df21
 
 # %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
 # ## Read data
@@ -368,310 +377,13 @@ variable_labels = {'id': 'Identifikátor uchazeče (kódované rodné číslo)',
  'dat_zaps': 'Datum zápisu'}
 
 # %%
-df = pd.read_parquet('temp/uchazec/uch21.parquet')
+df = pd.read_parquet('../temp/uchazec/uch21.parquet')
 
 # %% [markdown]
-# ## Data 2021
+# ## Filtrování dat
 
 # %%
-df = df21
-total_len = df.shape[0]
-print(f'Celkem podaných přihlášek: {total_len:,}\n')
-print(f"Rodné číslo jako id: {np.sum(df['id'].str[4:6] == 'QQ'):,} ({100 * np.sum(df['id'].str[4:6] == 'QQ') / total_len:.3g} %)")
-print(f"Česká národnost: {np.sum(df['stat_iso'] == 'CZE'):,} ({100 * np.sum(df['stat_iso'] == 'CZE') / total_len:.3g} %)")
-guessed_year = df['rmat'].value_counts().index[0]
-print(f"Rok maturity {guessed_year}: {np.sum(df['rmat'] == guessed_year):,} ({100 * np.sum(df['rmat'] == guessed_year) / total_len:.3g} %)")
-print(f"Uvedený výsledek přijímacího řízení: {np.sum(~pd.isna(df['vypr'])):,} ({100 * np.sum(~pd.isna(df['vypr'])) / total_len:.3g} %)")
-
-df = df[df['id'].str[4:6] == 'QQ']
-df = df[df['stat_iso'] == 'CZE']
-df = df[df['rmat'] == guessed_year]
-df = df.dropna(subset=['vypr'])
-unused_cat = ['gender', 'stat_iso', 'ss_typ']
-for uc in unused_cat:
-    df[uc] = df[uc].cat.remove_unused_categories()
-df = df.reset_index(drop=True)
-
-print(f"Filtrovaný dataset obsahuje {df.shape[0]:,} přihlášek ({100 * df.shape[0] / total_len:.3g} %)")
-
-# %%
-url = 'http://stistko.uiv.cz/katalog/textdata/C213145AKEN.xml'
-rg = pd.read_xml(url, encoding='cp1250', xpath='./veta')
-nuts_dict = rg.set_index('KOD')['ZKR'].to_dict()
-df['ss_kraj'] = df['ss_nuts'].str[:5].map(nuts_dict).astype('category')
-
-# %%
-pocet = df['id'].value_counts().rename('pocet').reset_index().rename(columns={'index': 'id'})
-df = pd.merge(df, pocet)
-df['w'] = 1 / df['pocet']
-
-# %%
-kraje = df.groupby('ss_kraj')['w'].sum()
-contig = df.groupby(['ss_kraj', 'vypr'])['w'].sum().unstack()
-np.round(100 * contig.T / kraje, 1)
-
-# %%
-denom = df.groupby('gender')['w'].sum()
-contig = df.groupby(['gender', 'vypr'])['w'].sum().unstack()
-np.round(100 * contig.T / denom, 1)
-
-# %%
-denom = df.groupby('ss_typ')['w'].sum()
-contig = df.groupby(['ss_typ', 'vypr'])['w'].sum().unstack()
-np.round(100 * contig.T / denom, 1)
-
-# %%
-denom
-
-# %%
-kraje
-
-# %% [markdown]
-# Ok, výsledek přijímacího řízení podle kraje není příliš smysluplný.
-
-# %%
-df['vypr_flag'] = df['vypr'].str.startswith('Přijat')
-df['zaps_neprijat'] = df['zaps'] == 'Uchazeč nebyl přijat'
-df['zaps_zapsal'] = df['zaps'] == 'Uchazeč se zapsal'
-df['zaps_nezapsal'] = df['zaps'] == 'Uchazeč se nezapsal'
-
-other_keys = ['gender', 'ss_kraj', 'ss_typ', 'ss_gym_delka']
-df_ids = df.groupby('id')[other_keys].first().reset_index()
-
-pedf_list = ['Pedagogická fakulta', 'Fakulta pedagogická']
-df['pedf'] = df['fak_nazev'].isin(pedf_list)
-df['ones'] = 1
-
-variables = ['ones', 'vypr_flag', 'zaps_zapsal']
-cols = ['prihl_nepedf', 'prihl_pedf', 'prijat_nepedf', 'prijat_pedf', 'zapis_nepedf', 'zapis_pedf']
-foo = df.groupby(['id', 'pedf'])[variables].sum().unstack('pedf')
-foo.columns = cols
-foo = foo.fillna(0).reset_index()
-
-ff = pd.merge(df_ids, foo)
-ff.to_parquet(f'temp/uchazec/ff{guessed_year}.parquet')
-
-# %%
-(ff[cols] > 0).value_counts().rename('count').reset_index().query('prihl_nepedf & prihl_pedf & prijat_nepedf & prijat_pedf')
-
-# %%
-ff.head()
-
-# %%
-for c in cols:
-    ff[f'{c}_bool'] = ff[c] > 0
-    
-ff['prihl_bool'] = ff['prihl_pedf_bool'] | ff['prihl_nepedf_bool']
-ff['prijat_bool'] = ff['prijat_pedf_bool'] | ff['prijat_nepedf_bool']
-ff['zapis_bool'] = ff['zapis_pedf_bool'] | ff['zapis_nepedf_bool']
-
-# %%
-649 + 625 + 225 + 14
-
-# %%
-ff['prijat_bool'].mean()
-
-# %%
-ff[ff['prihl_pedf_bool']]['prijat_pedf_bool'].mean()
-
-# %%
-ff[ff['prihl_nepedf_bool']]['prijat_nepedf_bool'].mean()
-
-# %%
-ff.groupby('gender')['prihl_pedf_bool'].mean()
-
-# %%
-ff.groupby('gender')['zapis_pedf_bool'].mean()
-
-# %%
-28835+21640
-
-# %%
-ff['gender'].value_counts()
-
-# %%
-ff[ff['prihl_pedf'] > 0]['gender'].value_counts()
-
-# %%
-ff[ff['zapis_pedf'] > 0]['gender'].value_counts()
-
-# %%
-ff.groupby('gender')['prihl_nepedf_bool'].mean()
-
-# %%
-ff[ff['prihl_nepedf'] > 0]['gender'].value_counts()
-
-# %%
-ff[ff['zapis_nepedf'] > 0]['gender'].value_counts()
-
-# %%
-ff.head()
-
-# %% [markdown]
-# ## Data 2017
-
-# %%
-df = df17
-total_len = df.shape[0]
-print(f'Celkem podaných přihlášek: {total_len:,}\n')
-print(f"Rodné číslo jako id: {np.sum(df['id'].str[4:6] == 'QQ'):,} ({100 * np.sum(df['id'].str[4:6] == 'QQ') / total_len:.3g} %)")
-print(f"Česká národnost: {np.sum(df['stat_iso'] == 'CZE'):,} ({100 * np.sum(df['stat_iso'] == 'CZE') / total_len:.3g} %)")
-guessed_year = df['rmat'].value_counts().index[0]
-print(f"Rok maturity {guessed_year}: {np.sum(df['rmat'] == guessed_year):,} ({100 * np.sum(df['rmat'] == guessed_year) / total_len:.3g} %)")
-print(f"Uvedený výsledek přijímacího řízení: {np.sum(~pd.isna(df['vypr'])):,} ({100 * np.sum(~pd.isna(df['vypr'])) / total_len:.3g} %)")
-
-df = df[df['id'].str[4:6] == 'QQ']
-df = df[df['stat_iso'] == 'CZE']
-df = df[df['rmat'] == guessed_year]
-df = df.dropna(subset=['vypr'])
-unused_cat = ['gender', 'stat_iso', 'ss_typ']
-for uc in unused_cat:
-    df[uc] = df[uc].cat.remove_unused_categories()
-df = df.reset_index(drop=True)
-
-print(f"Filtrovaný dataset obsahuje {df.shape[0]:,} přihlášek ({100 * df.shape[0] / total_len:.3g} %)")
-
-# %%
-url = 'http://stistko.uiv.cz/katalog/textdata/C213145AKEN.xml'
-rg = pd.read_xml(url, encoding='cp1250', xpath='./veta')
-nuts_dict = rg.set_index('KOD')['ZKR'].to_dict()
-df['ss_kraj'] = df['ss_nuts'].str[:5].map(nuts_dict).astype('category')
-
-# %%
-kraje = df['ss_kraj'].value_counts()
-contig = df.groupby('ss_kraj')['vypr'].value_counts().unstack()
-np.round(100 * contig.T / kraje, 1)
-
-# %%
-df['vypr_flag'] = df['vypr'].str.startswith('Přijat')
-df['zaps_neprijat'] = df['zaps'] == 'Uchazeč nebyl přijat'
-df['zaps_zapsal'] = df['zaps'] == 'Uchazeč se zapsal'
-df['zaps_nezapsal'] = df['zaps'] == 'Uchazeč se nezapsal'
-
-other_keys = ['gender', 'ss_kraj', 'ss_typ', 'ss_gym_delka']
-df_ids = df.groupby('id')[other_keys].first().reset_index()
-
-pedf_list = ['Pedagogická fakulta', 'Fakulta pedagogická']
-df['pedf'] = df['fak_nazev'].isin(pedf_list)
-df['ones'] = 1
-
-variables = ['ones', 'vypr_flag', 'zaps_zapsal']
-cols = ['prihl_nepedf', 'prihl_pedf', 'prijat_nepedf', 'prijat_pedf', 'zapis_nepedf', 'zapis_pedf']
-foo = df.groupby(['id', 'pedf'])[variables].sum().unstack('pedf')
-foo.columns = cols
-foo = foo.fillna(0).reset_index()
-
-ff = pd.merge(df_ids, foo)
-ff.to_parquet(f'temp/uchazec/ff{guessed_year}.parquet')
-
-# %%
-(ff[cols] > 0).value_counts().rename('count').reset_index().query('prihl_nepedf & prihl_pedf & prijat_nepedf & prijat_pedf')
-
-# %%
-652 + 543 + 193 +21
-
-# %%
-for c in cols:
-    ff[f'{c}_bool'] = ff[c] > 0
-    
-ff['prihl_bool'] = ff['prihl_pedf_bool'] | ff['prihl_nepedf_bool']
-ff['prijat_bool'] = ff['prijat_pedf_bool'] | ff['prijat_nepedf_bool']
-ff['zapis_bool'] = ff['zapis_pedf_bool'] | ff['zapis_nepedf_bool']
-
-# %%
-ff['prijat_bool'].mean()
-
-# %%
-ff[ff['prihl_pedf_bool']]['prijat_pedf_bool'].mean()
-
-# %%
-ff[ff['prihl_nepedf_bool']]['prijat_nepedf_bool'].mean()
-
-# %%
-ff['gender'].value_counts()
-
-# %%
-25332 + 18409
-
-# %%
-ff.groupby('gender')['prihl_pedf_bool'].mean()
-
-# %%
-ff.groupby('gender')['zapis_pedf_bool'].mean()
-
-# %%
-ff[ff['zapis_pedf'] > 0]['gender'].value_counts()
-
-# %%
-ff.groupby('ss_typ')['prihl_pedf_bool'].mean()
-
-# %%
-
-# %%
-os.system('/mnt/c/Program\ Files/Google/Chrome/Application/chrome.exe')
-
-# %%
-os.system('/mnt/c/Program\ Files/Mozilla\ Firefox/firefox.exe')
-
-# %%
-os.system('/mnt/c/Users/tomas/AppData/Local/Microsoft/WindowsApps/python.exe')
-
-# %%
-os.system('/mnt/c/Program\ Files/Tad/Tad.exe "D:\temp\dataframes\2021-02-06_13-42-12.csv"')
-
-# %%
-os.system('/mnt/c/Program\ Files/Tad/Tad.exe "D:\temp\dataframes\2021-02-06_13-42-12.csv"')
-
-# %%
-os.system('/mnt/c/Windows/System32/cmd.exe')
-
-# %%
-os.system("/mnt/c/Users/tomas/AppData/Local/Microsoft/WindowsApps/python.exe -c 'import os; os.starts(\\'D:\\\\temp\\\\dataframes\\\\2021-02-06_13-42-12.csv\\')'")
-
-# %%
-os.system('conhost.exe -a "D:\temp\dataframes\2021-02-06_13-42-12.csv"')
-
-# %%
-os.system('cmd.exe /c "D:\temp\dataframes\2021-02-06_13-42-12.csv"')
-
-# %%
-subprocess.run('cmd.exe')
-
-# %% jupyter={"outputs_hidden": true} tags=[]
-subprocess.run(['bash', '-c', '/mnt/c/Program\ Files/Tad/Tad.exe "D:\\temp\\dataframes\\2021-02-06_13-42-12.csv"'])
-
-# %% jupyter={"outputs_hidden": true} tags=[]
-subprocess.run(['sh', '-c', '/mnt/c/Program\ Files/Tad/Tad.exe'])
-
-# %%
-1 + 1
-
-# %% jupyter={"outputs_hidden": true} tags=[]
-subprocess.run(['bash', '-c', '/mnt/c/Program\ Files/Tad/Tad.exe "D:\temp\dataframes\2021-02-06_13-42-12.csv"'])
-
-# %%
-/mnt/c/Program\ Files/Tad/Tad.exe "D:\temp\dataframes\2021-02-06_13-42-12.csv"
-
-# %% jupyter={"outputs_hidden": true} tags=[]
-subprocess.run('bash /mnt/c/Program Files/Tad/Tad.exe', stdout=None, stderr=None)
-
-# %%
-os.system('sh "/mnt/c/Program Files/Tad/Tad.exe" ')
-
-# %%
-subprocess.run(["cat"], stdout=subprocess.PIPE, text=True, input="Hello from the other side")
-
-# %%
-1 + 1
-
-# %%
-os.system('whoami')
-
-# %%
-os.system('alias tad=\'/mnt/c/Program\ Files/Tad/Tad.exe\';')
-
-# %%
-os.system('tad')
+df.shape
 
 # %% [markdown]
 # - QQ v id, pak zkontroluj kolik je opakovaných záznamů; tím bych měl mít také jenom českou národnost
@@ -687,6 +399,24 @@ os.system('tad')
 # %%
 # QQ v id
 (df['id'].str[4:6] == 'QQ').value_counts()
+
+# %%
+df = df[df['id'].str[4:6] == 'QQ']
+df = df[df['stat_iso'] == 'CZE']
+# df = df[df['ss_typ'].isin(['Gymnázium', 'SOŠ'])]
+# jen žáci co letos maturují
+df = df[df['rmat'] == 2021]
+df = df.dropna(subset=['vypr'])
+unused_cat = ['gender', 'stat_iso', 'ss_typ']
+for uc in unused_cat:
+    df[uc] = df[uc].cat.remove_unused_categories()
+df = df.reset_index(drop=True)
+
+# %%
+url = 'http://stistko.uiv.cz/katalog/textdata/C213145AKEN.xml'
+rg = pd.read_xml(url, encoding='cp1250', xpath='./veta')
+nuts_dict = rg.set_index('KOD')['ZKR'].to_dict()
+df['ss_kraj'] = df['ss_nuts'].str[:5].map(nuts_dict).astype('category')
 
 # %%
 df['vypr']
@@ -1028,7 +758,7 @@ df['obor1_1'].iloc[1]
 
 # %%
 
-# %% jupyter={"outputs_hidden": true} tags=[]
+# %%
 w = pd.io.stata.StataWriterUTF8(f'{data_root}/uchazec/uch21.dta', df, write_index=False, version=118,
                                 variable_labels=variable_labels, value_labels=value_labels)
 w.write_file()

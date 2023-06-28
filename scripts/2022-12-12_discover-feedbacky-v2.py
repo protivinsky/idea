@@ -213,15 +213,20 @@ qq_text = qq[qq['type'] == 'text'][['code', 'type', 'question']]
 br_text = []
 for i, row in qq_text.iterrows():
     print(row['code'])
-    br_text.append(plot_text(row['code'], row['code'], f'[{row["code"]}] {row["question"]}', True))
+    if row['code'] == 'zaOponou':
+        print(f'Skipping, sensitive: {row["code"]}')
+    else:
+        br_text.append(plot_text(row['code'], row['code'], f'[{row["code"]}] {row["question"]}', True))
 
 group_plots.append(rt.Branch(br_text, title='Otevřené otázky'))
 
 rt.Branch(group_plots, title='Discover: Studentské feedbacky 2022').show()
 
 
+qq.show()
 
 
+qq['code'][17] == 'zaOponou'
 
 for s in sss:
     res[s]['session'] = s
@@ -347,3 +352,5 @@ for x in xs:
 
 
 qs['A'].columns
+
+

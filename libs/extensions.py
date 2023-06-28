@@ -1,3 +1,5 @@
+import base64
+import io
 import os
 from typing import Union
 import pandas as pd
@@ -7,11 +9,16 @@ from yattag import Doc, indent
 from datetime import datetime
 from libs.utils import create_stamped_temp, get_stamp, create_temp_dir
 from libs.rt_content import base_css, color_table_css
-from libs.projects.paq import fig_to_image_data
 import reportree as rt
 import docx
 import yattag
 import markdown
+
+
+def fig_to_image_data(fig, format='png'):
+    image = io.BytesIO()
+    fig.savefig(image, format=format)
+    return base64.encodebytes(image.getvalue()).decode('utf-8')
 
 
 os.environ['TEMP'] = 'D:/temp'
@@ -40,8 +47,9 @@ def docx_document_show(self, **kwargs):
     _open(path)
 
 
-_custom_head = f"""<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Libre+Franklin" />""" \
-        f"""<style>{base_css}{color_table_css}</style>"""
+# _custom_head = f"""<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Libre+Franklin" />""" \
+#         f"""<style>{base_css}{color_table_css}</style>"""
+_custom_head = f"""<style>{base_css}{color_table_css}</style>"""
 _rtree_writer = rt.io.InjectWriter(value=_custom_head)
 
 
@@ -100,8 +108,8 @@ def yattag_doc_md(doc, md):
     doc.asis(markdown.markdown(md))
 
 
-def yattag_doc_image(doc, fig, **kwargs):
-    doc.stag('image', src=f'data:image/png;base64,{fig_to_image_data(fig)}', **kwargs)
+def yattag_doc_image(doc, fig, format='png', **kwargs):
+    doc.stag('image', src=f'data:image/{format};base64,{fig_to_image_data(fig, format=format)}', **kwargs)
 
 
 def yattag_doc_show(doc, *args, **kwargs):
