@@ -49,7 +49,7 @@ plt.rcParams['figure.figsize'] = 10, 5
 import dbf
 
 # %%
-data_root = '/mnt/d/projects/idea/data'
+data_root = '/home/thomas/projects/idea/data'
 path17 = 'uchazec/0022MUCH17P'
 path21 = 'uchazec/0022MUCH21P'
 
@@ -61,7 +61,7 @@ path21 = 'uchazec/0022MUCH21P'
 def loader(year=21):
     
     # year can be 17 or 21
-    data_root = '/mnt/d/projects/idea/data'
+    data_root = '/home/thomas/projects/idea/data'
     path = f'uchazec/0022MUCH{year}P'
     
     df = pd.read_csv(f'{data_root}/{path}.csv', encoding='cp1250', low_memory=False)
@@ -110,6 +110,7 @@ def loader(year=21):
     variable_labels = {}
     
     df = df.rename(columns=to_rename).drop(columns=to_drop)
+    # return df, variable_labels, value_labels
     
     # label STAT, STATB: register AAST
     aast_xml = 'http://stistko.uiv.cz/katalog/textdata/C21752AAST.xml'
@@ -335,6 +336,21 @@ df = df21
 
 # %%
 df.shape
+df.columns
+
+
+df['id'] = df['id'].str.strip()
+df = df[df['id'].str.len() == 10].copy()
+df.shape
+df['id'].value_counts().sort_values(ascending=False).head(20)
+df['foo'] = df['id'].apply(lambda x: x[:4] + x[6:])
+bar = df[['foo', 'id']].drop_duplicates()['foo'].value_counts().sort_values(ascending=False)
+
+sel = bar.index[0]
+sel
+df[df['foo'] == sel]
+df = df[df['id'].str[4:6] == 'QQ']
+df = df[df['stat_iso'] == 'CZE']
 
 # %%
 variable_labels
